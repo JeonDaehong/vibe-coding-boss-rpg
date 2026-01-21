@@ -1,0 +1,22 @@
+{
+  "name": "boss_rpg",
+  "version": "1.0.0",
+  "description": "2.5D Top-down RPG Game",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.9",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}
