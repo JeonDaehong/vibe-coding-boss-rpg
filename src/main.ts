@@ -1,9 +1,8 @@
 import Phaser from 'phaser';
-import { TitleScene } from './scenes/TitleScene';
+import { BootScene } from './scenes/BootScene';
+import { PreloadScene } from './scenes/PreloadScene';
 import { GameScene } from './scenes/GameScene';
 import { UIScene } from './scenes/UIScene';
-import { LabScene, ShopScene, StarScene, DungeonScene, ChurchScene, MayorScene } from './scenes/BuildingScene';
-import { BossBattleScene } from './scenes/BossBattleScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -19,10 +18,15 @@ const config: Phaser.Types.Core.GameConfig = {
       debug: false,
     },
   },
-  scene: [TitleScene, GameScene, UIScene, LabScene, ShopScene, StarScene, DungeonScene, ChurchScene, MayorScene, BossBattleScene],
+  scene: [BootScene, PreloadScene, GameScene, UIScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+  render: {
+    antialias: true,
+    pixelArt: false,
+    roundPixels: false,
   },
 };
 
