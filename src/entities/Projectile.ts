@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { Enemy } from './Enemy';
+import { getSoundManager } from '../utils/SoundManager';
 
 export interface ProjectileConfig {
   scene: Phaser.Scene;
@@ -86,6 +87,9 @@ export class Projectile extends Phaser.GameObjects.Container {
   }
 
   private onHit(): void {
+    const soundManager = getSoundManager();
+    soundManager?.playArrowHit();
+
     if (this.target && this.target.active) {
       const killed = this.target.takeDamage(this.damage);
       if (killed) {

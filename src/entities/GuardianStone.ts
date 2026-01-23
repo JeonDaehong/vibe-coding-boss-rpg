@@ -141,8 +141,8 @@ export class GuardianStone extends Phaser.GameObjects.Container {
     this.currentHealth -= amount;
     this.updateHealthBar();
 
-    // Heavy shake
-    this.scene.cameras.main.shake(300, 0.02);
+    // Light shake (reduced intensity)
+    this.scene.cameras.main.shake(100, 0.005);
 
     // Flash effect
     this.sprite.setTint(0xFF0000);

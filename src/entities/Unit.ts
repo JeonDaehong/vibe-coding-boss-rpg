@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
-import { isPointOnPath } from '../config/PathConfig';
+import { canPlaceUnit } from '../config/PathConfig';
+import { getSoundManager } from '../utils/SoundManager';
+import { GRADES } from '../config/GameConfig';
 
 export interface UnitConfig {
   scene: Phaser.Scene;
@@ -116,29 +118,16 @@ export class Unit extends Phaser.GameObjects.Container {
   }
 
   private getGradeColor(): string {
-    const colors: { [key: string]: string } = {
-      'F': '#808080',
-      'E': '#32CD32',
-      'D': '#1E90FF',
-      'C': '#9932CC',
-      'B': '#FFA500',
-      'A': '#FF4500',
-      'S': '#FFD700',
-    };
-    return colors[this.grade] || '#FFFFFF';
+    const gradeData = GRADES[this.grade];
+    if (gradeData) {
+      return '#' + gradeData.color.toString(16).padStart(6, '0');
+    }
+    return '#FFFFFF';
   }
 
   public getGradeColorHex(): number {
-    const colors: { [key: string]: number } = {
-      'F': 0x808080,
-      'E': 0x32CD32,
-      'D': 0x1E90FF,
-      'C': 0x9932CC,
-      'B': 0xFFA500,
-      'A': 0xFF4500,
-      'S': 0xFFD700,
-    };
-    return colors[this.grade] || 0xFFFFFF;
+    const gradeData = GRADES[this.grade];
+    return gradeData ? gradeData.color : 0xFFFFFF;
   }
 
   private updateHealthBar(): void {
@@ -196,8 +185,8 @@ export class Unit extends Phaser.GameObjects.Container {
     this.x = pointer.worldX;
     this.y = pointer.worldY;
 
-    // Check if placement is valid (not on path)
-    this.invalidPlacement = isPointOnPath(this.x, this.y);
+    // Check if placement is valid (inside walls and not on path)
+    this.invalidPlacement = !canPlaceUnit(this.x, this.y);
 
     // Update placement indicator
     this.updatePlacementIndicator();
@@ -231,10 +220,15 @@ export class Unit extends Phaser.GameObjects.Container {
     this.sprite.setAlpha(1);
     this.placementIndicator.setVisible(false);
 
+    const soundManager = getSoundManager();
+
     if (this.invalidPlacement) {
       // Return to original position
       this.x = this.dragStartX;
       this.y = this.dragStartY;
+
+      // Play invalid placement sound
+      soundManager?.playInvalidPlacement();
 
       // Show invalid placement feedback
       this.scene.cameras.main.shake(100, 0.005);
@@ -254,6 +248,9 @@ export class Unit extends Phaser.GameObjects.Container {
         duration: 800,
         onComplete: () => warningText.destroy(),
       });
+    } else {
+      // Play valid placement sound
+      soundManager?.playUnitPlace();
     }
 
     // Update depth based on new Y position

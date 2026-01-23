@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_WIDTH, GAME_HEIGHT, ECONOMY } from '../config/GameConfig';
 import { Unit } from '../entities/Unit';
+import { getSoundManager } from '../utils/SoundManager';
 
 export class UIScene extends Phaser.Scene {
   private goldText!: Phaser.GameObjects.Text;
@@ -370,6 +371,9 @@ export class UIScene extends Phaser.Scene {
   }
 
   private hideUnitInfoPanel(): void {
+    const soundManager = getSoundManager();
+    soundManager?.playButtonClick();
+
     // Deselect current unit
     if (this.selectedUnit && this.selectedUnit.active) {
       this.selectedUnit.deselect();
@@ -495,6 +499,9 @@ export class UIScene extends Phaser.Scene {
   }
 
   private onUnitButtonClick(): void {
+    const soundManager = getSoundManager();
+    soundManager?.playButtonClick();
+
     if (this.currentGold >= ECONOMY.randomUnitCost) {
       this.gameScene.events.emit('purchaseUnit');
 
@@ -506,6 +513,9 @@ export class UIScene extends Phaser.Scene {
   }
 
   private onCardButtonClick(): void {
+    const soundManager = getSoundManager();
+    soundManager?.playButtonClick();
+
     if (this.currentGold >= ECONOMY.randomCardCost) {
       // Card system placeholder
       this.showNotImplemented();
@@ -533,6 +543,9 @@ export class UIScene extends Phaser.Scene {
   }
 
   private showInsufficientGold(): void {
+    const soundManager = getSoundManager();
+    soundManager?.playInvalidPlacement();
+
     const warning = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, '골드가 부족합니다!', {
       fontSize: '32px',
       color: '#FF0000',

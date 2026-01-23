@@ -8,6 +8,11 @@ import {
   UNIT_STATS,
   ENEMY_STATS,
   WAVE_CONFIG,
+  ECONOMY,
+  getRandomGrade,
+  generateUnitStats,
+  getEnemyForWave,
+  EnemyType,
 } from '../config/GameConfig';
 import {
   ENEMY_PATHS,
@@ -23,10 +28,11 @@ import { Enemy } from '../entities/Enemy';
 import { Gate } from '../entities/Gate';
 import { GuardianStone } from '../entities/GuardianStone';
 import { Projectile } from '../entities/Projectile';
+import { SoundManager, initSoundManager, getSoundManager } from '../utils/SoundManager';
 
 export class GameScene extends Phaser.Scene {
   // Game state
-  public gold: number = 100;
+  public gold: number = ECONOMY.startingGold;
   public wave: number = 0;
   public isGameOver: boolean = false;
 
@@ -49,12 +55,23 @@ export class GameScene extends Phaser.Scene {
   private mapGraphics!: Phaser.GameObjects.Graphics;
   private pathGraphics!: Phaser.GameObjects.Graphics;
 
+  // Sound
+  public soundManager!: SoundManager;
+
   constructor() {
     super({ key: 'GameScene' });
   }
 
   create(): void {
     this.cameras.main.setBackgroundColor(0x1a2a1a);
+
+    // Initialize sound manager
+    this.soundManager = initSoundManager(this);
+
+    // Resume audio on first interaction
+    this.input.once('pointerdown', () => {
+      this.soundManager.resumeAudioContext();
+    });
 
     this.drawMap();
     this.drawOuterWalls();
@@ -368,6 +385,8 @@ export class GameScene extends Phaser.Scene {
     this.events.on('enemyKilled', (enemy: Enemy) => {
       this.gold += enemy.goldReward;
       this.events.emit('goldChanged', this.gold);
+      this.soundManager.playEnemyDeath();
+      this.soundManager.playGoldCollect();
 
       const index = this.enemies.indexOf(enemy);
       if (index > -1) {
@@ -377,6 +396,7 @@ export class GameScene extends Phaser.Scene {
 
     this.events.on('gateDestroyed', (gate: Gate) => {
       console.log(`Gate destroyed: ${gate.direction}`);
+      this.soundManager.playGateDestroyed();
     });
 
     this.events.on('guardianDestroyed', () => {
@@ -406,6 +426,7 @@ export class GameScene extends Phaser.Scene {
 
     this.wave++;
     this.events.emit('waveStarted', this.wave);
+    this.soundManager.playWaveStart();
 
     const enemyCount = WAVE_CONFIG.enemiesPerWave + Math.floor(this.wave * 1.5);
 
@@ -444,21 +465,15 @@ export class GameScene extends Phaser.Scene {
 
     const path = fullPath.slice(0, endIndex + 1);
 
-    // 적 타입 결정
-    let enemyType = ENEMY_STATS.BASIC_GOBLIN;
-    let texture = 'goblin';
+    // 웨이브에 따른 적 타입 결정
+    const enemyTypeKey = getEnemyForWave(this.wave);
+    const enemyStats = ENEMY_STATS[enemyTypeKey];
+    const texture = enemyTypeKey.toLowerCase();
 
-    if (this.wave >= 5 && Math.random() < 0.3) {
-      enemyType = ENEMY_STATS.GOBLIN_WARRIOR;
-      texture = 'goblin_warrior';
-    }
-    if (this.wave >= 10 && Math.random() < 0.2) {
-      enemyType = ENEMY_STATS.ORC;
-      texture = 'orc';
-    }
-
-    const healthMultiplier = 1 + (this.wave - 1) * 0.1;
-    const damageMultiplier = 1 + (this.wave - 1) * 0.05;
+    // 난이도 스케일링
+    const difficultyScale = Math.pow(WAVE_CONFIG.difficultyScale, this.wave - 1);
+    const healthMultiplier = difficultyScale;
+    const damageMultiplier = 1 + (this.wave - 1) * 0.08;
 
     const spawnPoint = fullPath[0];
 
@@ -467,12 +482,15 @@ export class GameScene extends Phaser.Scene {
       x: spawnPoint.x,
       y: spawnPoint.y,
       texture: texture,
-      name: enemyType.name,
-      health: Math.floor(enemyType.health * healthMultiplier),
-      damage: Math.floor(enemyType.damage * damageMultiplier),
-      speed: enemyType.speed,
-      goldReward: enemyType.goldReward + Math.floor(this.wave / 2),
+      name: enemyStats.name,
+      health: Math.floor(enemyStats.health * healthMultiplier),
+      damage: Math.floor(enemyStats.damage * damageMultiplier),
+      speed: enemyStats.speed,
+      goldReward: enemyStats.goldReward + Math.floor(this.wave / 2),
       targetPath: path,
+      enemyType: enemyStats.type as EnemyType,
+      special: enemyStats.special,
+      color: enemyStats.color,
     });
 
     (enemy as any).pathKey = pathKey;
@@ -483,9 +501,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnRandomUnit(): void {
-    if (this.gold < 50) return;
+    if (this.gold < ECONOMY.randomUnitCost) return;
 
-    this.gold -= 50;
+    this.gold -= ECONOMY.randomUnitCost;
     this.events.emit('goldChanged', this.gold);
 
     let x: number, y: number;
@@ -497,33 +515,103 @@ export class GameScene extends Phaser.Scene {
       attempts++;
     } while (isPointOnPath(x, y) && attempts < 50);
 
+    // 랜덤 등급 결정
+    const grade = getRandomGrade();
+    const stats = generateUnitStats(grade);
+
+    // 등급에 따른 텍스처 결정
+    const textureMap: { [key: string]: string } = {
+      ARCHER: 'archer_f',
+      MAGE: 'mage',
+      KNIGHT: 'knight',
+    };
+    const texture = textureMap[stats.type] || 'archer_f';
+
     const unit = new Unit({
       scene: this,
       x: x,
       y: y,
-      texture: 'archer_f',
-      name: UNIT_STATS.F_ARCHER.name,
-      grade: UNIT_STATS.F_ARCHER.grade,
-      health: UNIT_STATS.F_ARCHER.health,
-      damage: UNIT_STATS.F_ARCHER.damage,
-      attackSpeed: UNIT_STATS.F_ARCHER.attackSpeed,
-      range: UNIT_STATS.F_ARCHER.range,
+      texture: texture,
+      name: stats.name,
+      grade: stats.grade,
+      health: stats.health,
+      damage: stats.damage,
+      attackSpeed: stats.attackSpeed,
+      range: stats.range,
     });
     unit.setDepth(y);
     this.units.push(unit);
+    this.soundManager.playUnitSummon();
+
+    // 등급별 스폰 이펙트
+    const gradeColors: { [key: string]: number } = {
+      F: 0x808080,
+      E: 0x32CD32,
+      D: 0x1E90FF,
+      C: 0x9932CC,
+      B: 0xFFA500,
+      A: 0xFF4500,
+      S: 0xFFD700,
+      SS: 0xFF69B4,
+      SSS: 0x00FFFF,
+    };
+    const effectColor = gradeColors[grade] || 0xFFFFFF;
 
     // Spawn effect
     const effect = this.add.graphics();
     effect.setPosition(x, y);
-    effect.fillStyle(0xFFFFFF, 0.5);
-    effect.fillCircle(0, 0, 30);
+    effect.fillStyle(effectColor, 0.6);
+    effect.fillCircle(0, 0, 35);
+    effect.lineStyle(3, effectColor, 1);
+    effect.strokeCircle(0, 0, 40);
     this.tweens.add({
       targets: effect,
       alpha: 0,
-      scale: 2,
-      duration: 300,
+      scale: 2.5,
+      duration: 400,
       onComplete: () => effect.destroy(),
     });
+
+    // 높은 등급일 경우 추가 이펙트
+    if (['S', 'SS', 'SSS'].includes(grade)) {
+      this.cameras.main.flash(200, 255, 215, 0, false);
+
+      // 파티클 이펙트
+      for (let i = 0; i < 12; i++) {
+        const particle = this.add.graphics();
+        particle.setPosition(x, y);
+        particle.fillStyle(effectColor, 1);
+        particle.fillCircle(0, 0, 5);
+
+        const angle = (i / 12) * Math.PI * 2;
+        this.tweens.add({
+          targets: particle,
+          x: x + Math.cos(angle) * 80,
+          y: y + Math.sin(angle) * 80,
+          alpha: 0,
+          duration: 600,
+          ease: 'Power2',
+          onComplete: () => particle.destroy(),
+        });
+      }
+
+      // 등급 텍스트 표시
+      const gradeText = this.add.text(x, y - 60, `★ ${grade}급 ★`, {
+        fontSize: '24px',
+        color: '#' + effectColor.toString(16).padStart(6, '0'),
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 4,
+      }).setOrigin(0.5);
+
+      this.tweens.add({
+        targets: gradeText,
+        y: gradeText.y - 40,
+        alpha: 0,
+        duration: 1500,
+        onComplete: () => gradeText.destroy(),
+      });
+    }
   }
 
   private sortDepths(): void {
@@ -539,6 +627,7 @@ export class GameScene extends Phaser.Scene {
 
   private gameOver(): void {
     this.isGameOver = true;
+    this.soundManager.playGameOver();
 
     if (this.waveTimer) this.waveTimer.destroy();
     if (this.spawnTimer) this.spawnTimer.destroy();
@@ -597,6 +686,7 @@ export class GameScene extends Phaser.Scene {
           damage: unit.damage,
         });
         this.projectiles.push(projectile);
+        this.soundManager.playArrowShoot();
       }
     }
 
@@ -640,12 +730,14 @@ export class GameScene extends Phaser.Scene {
     // 수호석 공격 체크
     if (Math.abs(target.x - MAP_CENTER_X) < 30 && Math.abs(target.y - MAP_CENTER_Y) < 30) {
       this.guardianStone.takeDamage(enemy.damage);
+      this.soundManager.playGuardianHit();
       return;
     }
 
     // 외문 공격 체크
     const outerGate = this.outerGates.get(pathKey);
     if (outerGate && !outerGate.isDestroyed) {
+      this.soundManager.playGateHit();
       const destroyed = outerGate.takeDamage(enemy.damage);
       if (destroyed) {
         const fullPath = ENEMY_PATHS[pathKey as keyof typeof ENEMY_PATHS];
@@ -656,7 +748,8 @@ export class GameScene extends Phaser.Scene {
         } else {
           enemy.targetPath = [...fullPath];
         }
-        enemy.currentPathIndex = GATE_INDICES.OUTER_GATE;
+        // 성문 다음 지점부터 이동하도록 설정
+        enemy.currentPathIndex = GATE_INDICES.OUTER_GATE + 1;
         enemy.isAttacking = false;
       }
       return;
@@ -665,11 +758,13 @@ export class GameScene extends Phaser.Scene {
     // 내문 공격 체크
     const innerGate = this.innerGates.get(innerGateKey);
     if (innerGate && !innerGate.isDestroyed) {
+      this.soundManager.playGateHit();
       const destroyed = innerGate.takeDamage(enemy.damage);
       if (destroyed) {
         const fullPath = ENEMY_PATHS[pathKey as keyof typeof ENEMY_PATHS];
         enemy.targetPath = [...fullPath];
-        enemy.currentPathIndex = GATE_INDICES.INNER_GATE;
+        // 성문 다음 지점부터 이동하도록 설정
+        enemy.currentPathIndex = GATE_INDICES.INNER_GATE + 1;
         enemy.isAttacking = false;
       }
       return;
