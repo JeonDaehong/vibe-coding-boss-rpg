@@ -222,7 +222,11 @@ export class ParticleManager {
       const startY = y + Phaser.Math.Between(0, 30);
       sparkle.setPosition(startX, startY);
       sparkle.fillStyle(0xFFD700, 1);
-      sparkle.fillStar(0, 0, 5, 4, 2, 5);
+      // 십자 모양 반짝임
+      sparkle.fillRect(-1, -4, 2, 8);
+      sparkle.fillRect(-4, -1, 8, 2);
+      sparkle.fillStyle(0xFFFFFF, 0.7);
+      sparkle.fillCircle(0, 0, 2);
       sparkle.setDepth(9991);
 
       this.scene.tweens.add({

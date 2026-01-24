@@ -29,6 +29,7 @@ import { Gate } from '../entities/Gate';
 import { GuardianStone } from '../entities/GuardianStone';
 import { Projectile } from '../entities/Projectile';
 import { SoundManager, initSoundManager, getSoundManager } from '../utils/SoundManager';
+import { ParticleManager, initParticleManager, getParticleManager } from '../utils/ParticleManager';
 
 export class GameScene extends Phaser.Scene {
   // Game state
@@ -54,19 +55,27 @@ export class GameScene extends Phaser.Scene {
   // Graphics
   private mapGraphics!: Phaser.GameObjects.Graphics;
   private pathGraphics!: Phaser.GameObjects.Graphics;
+  private ambientGraphics!: Phaser.GameObjects.Graphics;
+  private lightingGraphics!: Phaser.GameObjects.Graphics;
 
-  // Sound
+  // Sound & Particles
   public soundManager!: SoundManager;
+  public particleManager!: ParticleManager;
+
+  // Decorations
+  private decorations: Phaser.GameObjects.Graphics[] = [];
+  private ambientParticles: Phaser.GameObjects.Graphics[] = [];
 
   constructor() {
     super({ key: 'GameScene' });
   }
 
   create(): void {
-    this.cameras.main.setBackgroundColor(0x1a2a1a);
+    this.cameras.main.setBackgroundColor(0x0a1510);
 
-    // Initialize sound manager
+    // Initialize managers
     this.soundManager = initSoundManager(this);
+    this.particleManager = initParticleManager(this);
 
     // Resume audio on first interaction
     this.input.once('pointerdown', () => {
@@ -74,6 +83,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.drawMap();
+    this.drawEnvironmentDecorations();
     this.drawOuterWalls();
     this.drawInnerWalls();
     this.drawPaths();
@@ -82,6 +92,8 @@ export class GameScene extends Phaser.Scene {
     this.createInitialUnits();
     this.setupEventListeners();
     this.startWaveSystem();
+    this.createAmbientEffects();
+    this.createLightingEffects();
 
     // Depth sorting
     this.time.addEvent({
@@ -92,27 +104,380 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  // 환경 장식 그리기 (나무, 바위, 풀 등)
+  private drawEnvironmentDecorations(): void {
+    // 성벽 바깥 숲 (나무들)
+    const treePositions = [
+      { x: 30, y: 50 }, { x: 60, y: 30 }, { x: 20, y: 120 },
+      { x: 50, y: 180 }, { x: 25, y: 280 }, { x: 45, y: 380 },
+      { x: 30, y: 480 }, { x: 55, y: 550 }, { x: 20, y: 620 },
+      { x: GAME_WIDTH - 30, y: 50 }, { x: GAME_WIDTH - 60, y: 100 },
+      { x: GAME_WIDTH - 25, y: 200 }, { x: GAME_WIDTH - 50, y: 320 },
+      { x: GAME_WIDTH - 35, y: 450 }, { x: GAME_WIDTH - 55, y: 580 },
+      { x: 150, y: 25 }, { x: 300, y: 35 }, { x: 450, y: 20 },
+      { x: 600, y: 30 }, { x: 750, y: 25 }, { x: 900, y: 35 },
+      { x: 150, y: GAME_HEIGHT - 25 }, { x: 350, y: GAME_HEIGHT - 35 },
+      { x: 550, y: GAME_HEIGHT - 20 }, { x: 750, y: GAME_HEIGHT - 30 },
+    ];
+
+    treePositions.forEach(pos => this.drawTree(pos.x, pos.y, Phaser.Math.Between(15, 25)));
+
+    // 성벽 안쪽 장식 (작은 관목, 돌)
+    for (let i = 0; i < 30; i++) {
+      const x = Phaser.Math.Between(100, GAME_WIDTH - 100);
+      const y = Phaser.Math.Between(100, GAME_HEIGHT - 100);
+
+      // 경로 위가 아닌 곳에만
+      if (!isPointOnPath(x, y)) {
+        const dist = Math.sqrt(Math.pow(x - MAP_CENTER_X, 2) + Math.pow(y - MAP_CENTER_Y, 2));
+        if (dist > 220) { // 내성 밖에만
+          if (Math.random() > 0.5) {
+            this.drawBush(x, y);
+          } else {
+            this.drawRock(x, y);
+          }
+        }
+      }
+    }
+
+    // 잔디 패치
+    for (let i = 0; i < 50; i++) {
+      const x = Phaser.Math.Between(90, GAME_WIDTH - 90);
+      const y = Phaser.Math.Between(90, GAME_HEIGHT - 90);
+      if (!isPointOnPath(x, y)) {
+        this.drawGrassPatch(x, y);
+      }
+    }
+  }
+
+  private drawTree(x: number, y: number, size: number): void {
+    const tree = this.add.graphics();
+    tree.setPosition(x, y);
+    tree.setDepth(1);
+
+    // 그림자
+    tree.fillStyle(0x000000, 0.3);
+    tree.fillEllipse(5, size + 5, size * 1.2, size * 0.4);
+
+    // 나무 기둥
+    tree.fillStyle(0x4a3728);
+    tree.fillRect(-size * 0.15, 0, size * 0.3, size);
+
+    // 나뭇잎 (여러 층)
+    const leafColors = [0x1a5a1a, 0x2a6a2a, 0x1a4a1a];
+    for (let i = 0; i < 3; i++) {
+      tree.fillStyle(leafColors[i]);
+      tree.fillCircle(0, -size * 0.3 - i * size * 0.25, size * (0.8 - i * 0.15));
+    }
+
+    // 하이라이트
+    tree.fillStyle(0x3a8a3a, 0.5);
+    tree.fillCircle(-size * 0.2, -size * 0.5, size * 0.3);
+
+    this.decorations.push(tree);
+  }
+
+  private drawBush(x: number, y: number): void {
+    const bush = this.add.graphics();
+    bush.setPosition(x, y);
+    bush.setDepth(y - 10);
+
+    // 그림자
+    bush.fillStyle(0x000000, 0.2);
+    bush.fillEllipse(3, 8, 20, 8);
+
+    // 관목
+    bush.fillStyle(0x2a5a2a);
+    bush.fillCircle(0, 0, 10);
+    bush.fillCircle(-6, 2, 7);
+    bush.fillCircle(6, 2, 7);
+
+    // 하이라이트
+    bush.fillStyle(0x4a8a4a, 0.5);
+    bush.fillCircle(-2, -3, 4);
+
+    this.decorations.push(bush);
+  }
+
+  private drawRock(x: number, y: number): void {
+    const rock = this.add.graphics();
+    rock.setPosition(x, y);
+    rock.setDepth(y - 10);
+
+    // 그림자
+    rock.fillStyle(0x000000, 0.3);
+    rock.fillEllipse(3, 8, 18, 6);
+
+    // 바위
+    rock.fillStyle(0x5a5a5a);
+    rock.fillEllipse(0, 0, 14, 10);
+
+    // 하이라이트
+    rock.fillStyle(0x7a7a7a, 0.6);
+    rock.fillEllipse(-3, -2, 6, 4);
+
+    // 어두운 부분
+    rock.fillStyle(0x3a3a3a, 0.5);
+    rock.fillEllipse(3, 3, 5, 3);
+
+    this.decorations.push(rock);
+  }
+
+  private drawGrassPatch(x: number, y: number): void {
+    const grass = this.add.graphics();
+    grass.setPosition(x, y);
+    grass.setDepth(y - 20);
+
+    const blades = Phaser.Math.Between(3, 6);
+    for (let i = 0; i < blades; i++) {
+      const offsetX = Phaser.Math.Between(-8, 8);
+      const height = Phaser.Math.Between(6, 12);
+      const color = Phaser.Math.RND.pick([0x3a7a3a, 0x4a8a4a, 0x2a6a2a]);
+
+      grass.fillStyle(color, 0.8);
+      grass.fillTriangle(
+        offsetX - 2, 0,
+        offsetX + 2, 0,
+        offsetX + Phaser.Math.Between(-2, 2), -height
+      );
+    }
+
+    this.decorations.push(grass);
+  }
+
+  // 환경 조명 효과
+  private createLightingEffects(): void {
+    this.lightingGraphics = this.add.graphics();
+    this.lightingGraphics.setDepth(9000);
+    this.lightingGraphics.setBlendMode(Phaser.BlendModes.ADD);
+
+    // 중앙 수호석 빛
+    const gradient = this.lightingGraphics;
+    gradient.fillStyle(0x00FFFF, 0.05);
+    gradient.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 150);
+    gradient.fillStyle(0x00FFFF, 0.03);
+    gradient.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 200);
+
+    // 성문 주변 횃불 빛
+    Object.values(OUTER_GATE_POSITIONS).forEach(pos => {
+      gradient.fillStyle(0xFFAA00, 0.08);
+      gradient.fillCircle(pos.x - 30, pos.y, 40);
+      gradient.fillCircle(pos.x + 30, pos.y, 40);
+    });
+
+    // 코너 타워 빛
+    const corners = [
+      { x: 80, y: 80 }, { x: GAME_WIDTH - 80, y: 80 },
+      { x: 80, y: GAME_HEIGHT - 80 }, { x: GAME_WIDTH - 80, y: GAME_HEIGHT - 80 }
+    ];
+    corners.forEach(c => {
+      gradient.fillStyle(0xFFAA00, 0.06);
+      gradient.fillCircle(c.x, c.y - 20, 50);
+    });
+  }
+
+  // 환경 파티클 (먼지, 반딧불 등)
+  private createAmbientEffects(): void {
+    // 반딧불이
+    this.time.addEvent({
+      delay: 500,
+      callback: () => {
+        if (this.ambientParticles.length < 20) {
+          this.createFirefly();
+        }
+      },
+      loop: true,
+    });
+
+    // 떨어지는 나뭇잎
+    this.time.addEvent({
+      delay: 2000,
+      callback: () => this.createFallingLeaf(),
+      loop: true,
+    });
+
+    // 먼지 입자
+    this.time.addEvent({
+      delay: 300,
+      callback: () => this.createDustParticle(),
+      loop: true,
+    });
+  }
+
+  private createFirefly(): void {
+    const x = Phaser.Math.Between(100, GAME_WIDTH - 100);
+    const y = Phaser.Math.Between(100, GAME_HEIGHT - 100);
+
+    const firefly = this.add.graphics();
+    firefly.setPosition(x, y);
+    firefly.setDepth(8000);
+    firefly.setBlendMode(Phaser.BlendModes.ADD);
+
+    const color = Phaser.Math.RND.pick([0xFFFF00, 0x00FF00, 0xAAFFAA]);
+    firefly.fillStyle(color, 0.8);
+    firefly.fillCircle(0, 0, 3);
+    firefly.fillStyle(color, 0.3);
+    firefly.fillCircle(0, 0, 8);
+
+    this.ambientParticles.push(firefly);
+
+    // 랜덤 움직임
+    const targetX = x + Phaser.Math.Between(-100, 100);
+    const targetY = y + Phaser.Math.Between(-100, 100);
+
+    this.tweens.add({
+      targets: firefly,
+      x: targetX,
+      y: targetY,
+      alpha: { from: 0.8, to: 0.2 },
+      duration: Phaser.Math.Between(3000, 6000),
+      ease: 'Sine.easeInOut',
+      yoyo: true,
+      repeat: 1,
+      onComplete: () => {
+        const idx = this.ambientParticles.indexOf(firefly);
+        if (idx > -1) this.ambientParticles.splice(idx, 1);
+        firefly.destroy();
+      },
+    });
+
+    // 깜빡임
+    this.tweens.add({
+      targets: firefly,
+      scaleX: 0.5,
+      scaleY: 0.5,
+      duration: 500,
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  private createFallingLeaf(): void {
+    const startX = Phaser.Math.Between(0, GAME_WIDTH);
+    const leaf = this.add.graphics();
+    leaf.setPosition(startX, -10);
+    leaf.setDepth(7500);
+
+    const leafColor = Phaser.Math.RND.pick([0x4a8a4a, 0x6a9a3a, 0x8a7a2a, 0x9a5a3a]);
+    leaf.fillStyle(leafColor, 0.7);
+    leaf.fillEllipse(0, 0, 8, 5);
+
+    // 나선형 낙하
+    const endX = startX + Phaser.Math.Between(-100, 100);
+    this.tweens.add({
+      targets: leaf,
+      x: endX,
+      y: GAME_HEIGHT + 20,
+      rotation: Math.PI * 4,
+      duration: Phaser.Math.Between(5000, 8000),
+      ease: 'Sine.easeInOut',
+      onUpdate: () => {
+        leaf.x += Math.sin(leaf.y * 0.02) * 0.5;
+      },
+      onComplete: () => leaf.destroy(),
+    });
+  }
+
+  private createDustParticle(): void {
+    const x = Phaser.Math.Between(100, GAME_WIDTH - 100);
+    const y = Phaser.Math.Between(100, GAME_HEIGHT - 100);
+
+    const dust = this.add.graphics();
+    dust.setPosition(x, y);
+    dust.setDepth(50);
+    dust.fillStyle(0xFFFFFF, 0.15);
+    dust.fillCircle(0, 0, Phaser.Math.Between(1, 3));
+
+    this.tweens.add({
+      targets: dust,
+      y: y - Phaser.Math.Between(20, 50),
+      alpha: 0,
+      duration: Phaser.Math.Between(2000, 4000),
+      onComplete: () => dust.destroy(),
+    });
+  }
+
   private drawMap(): void {
     this.mapGraphics = this.add.graphics();
 
-    // 배경 (성벽 바깥 - 어두운 숲)
-    this.mapGraphics.fillStyle(0x0a150a);
+    // 배경 (성벽 바깥 - 어두운 숲) - 그라디언트 효과
+    this.mapGraphics.fillStyle(0x050a08);
     this.mapGraphics.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    // 외성 내부 (잔디)
+    // 숲 패턴 배경
+    for (let i = 0; i < 100; i++) {
+      const x = Phaser.Math.Between(0, GAME_WIDTH);
+      const y = Phaser.Math.Between(0, GAME_HEIGHT);
+      this.mapGraphics.fillStyle(0x0a150a, 0.5);
+      this.mapGraphics.fillCircle(x, y, Phaser.Math.Between(10, 30));
+    }
+
+    // 외성 내부 (잔디) - 그라디언트
     this.mapGraphics.fillStyle(0x1a3a1a);
-    this.mapGraphics.fillRect(80, 80, GAME_WIDTH - 160, GAME_HEIGHT - 160);
+    this.mapGraphics.fillRoundedRect(80, 80, GAME_WIDTH - 160, GAME_HEIGHT - 160, 20);
 
-    // 내성 내부 (더 밝은 잔디)
-    this.mapGraphics.fillStyle(0x2a4a2a);
+    // 잔디 텍스처
+    for (let i = 0; i < 200; i++) {
+      const x = Phaser.Math.Between(90, GAME_WIDTH - 90);
+      const y = Phaser.Math.Between(90, GAME_HEIGHT - 90);
+      const color = Phaser.Math.RND.pick([0x1a4a1a, 0x2a5a2a, 0x1a3a1a]);
+      this.mapGraphics.fillStyle(color, 0.4);
+      this.mapGraphics.fillCircle(x, y, Phaser.Math.Between(5, 15));
+    }
+
+    // 내성 내부 - 여러 레이어로 깊이감
     const innerRadius = 200;
+    this.mapGraphics.fillStyle(0x1a4a2a);
+    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, innerRadius + 10);
+    this.mapGraphics.fillStyle(0x2a5a3a);
     this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, innerRadius);
+    this.mapGraphics.fillStyle(0x3a6a4a, 0.5);
+    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, innerRadius - 20);
 
-    // 중앙 석판
+    // 중앙 석판 - 정교한 디자인
+    // 외곽 링
+    this.mapGraphics.fillStyle(0x2a2a3a);
+    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 95);
+
+    // 장식 패턴
+    this.mapGraphics.lineStyle(2, 0x4a4a6a, 0.5);
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const x1 = MAP_CENTER_X + Math.cos(angle) * 60;
+      const y1 = MAP_CENTER_Y + Math.sin(angle) * 60;
+      const x2 = MAP_CENTER_X + Math.cos(angle) * 90;
+      const y2 = MAP_CENTER_Y + Math.sin(angle) * 90;
+      this.mapGraphics.lineBetween(x1, y1, x2, y2);
+    }
+
+    // 메인 석판
     this.mapGraphics.fillStyle(0x3a3a4a);
-    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 80);
-    this.mapGraphics.lineStyle(3, 0x4a4a5a);
-    this.mapGraphics.strokeCircle(MAP_CENTER_X, MAP_CENTER_Y, 80);
+    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 85);
+
+    // 내부 장식
+    this.mapGraphics.fillStyle(0x4a4a5a, 0.6);
+    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 70);
+
+    // 마법진 패턴
+    this.mapGraphics.lineStyle(2, 0x00AAAA, 0.3);
+    this.mapGraphics.strokeCircle(MAP_CENTER_X, MAP_CENTER_Y, 60);
+    this.mapGraphics.strokeCircle(MAP_CENTER_X, MAP_CENTER_Y, 40);
+
+    // 룬 문자 위치
+    this.mapGraphics.lineStyle(1, 0x00FFFF, 0.4);
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      const x = MAP_CENTER_X + Math.cos(angle) * 50;
+      const y = MAP_CENTER_Y + Math.sin(angle) * 50;
+      this.mapGraphics.fillStyle(0x00FFFF, 0.3);
+      this.mapGraphics.fillCircle(x, y, 4);
+    }
+
+    // 테두리
+    this.mapGraphics.lineStyle(4, 0x5a5a6a);
+    this.mapGraphics.strokeCircle(MAP_CENTER_X, MAP_CENTER_Y, 85);
+    this.mapGraphics.lineStyle(2, 0x6a6a7a);
+    this.mapGraphics.strokeCircle(MAP_CENTER_X, MAP_CENTER_Y, 90);
   }
 
   private drawOuterWalls(): void {

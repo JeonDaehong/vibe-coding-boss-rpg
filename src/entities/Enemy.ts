@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { EnemyType, MAP_CENTER_X, MAP_CENTER_Y } from '../config/GameConfig';
+import { getParticleManager } from '../utils/ParticleManager';
 
 export interface EnemyConfig {
   scene: Phaser.Scene;
@@ -37,10 +38,12 @@ export class Enemy extends Phaser.GameObjects.Container {
   private healthBar: Phaser.GameObjects.Graphics;
   private shadow: Phaser.GameObjects.Ellipse;
   private typeIndicator: Phaser.GameObjects.Graphics;
+  private auraEffect: Phaser.GameObjects.Graphics;
   private lastBlinkTime: number = 0;
   private blinkCooldown: number = 3000;
   private isUnderground: boolean = false;
   private surfaceIndex: number = 0;
+  private lastFootstepTime: number = 0;
 
   constructor(config: EnemyConfig) {
     super(config.scene, config.x, config.y);
@@ -59,11 +62,16 @@ export class Enemy extends Phaser.GameObjects.Container {
     // 타입별 초기화
     this.initializeByType();
 
-    // Shadow
-    this.shadow = config.scene.add.ellipse(0, 0, 30, 10, 0x000000, 0.3);
+    // Aura effect (behind everything)
+    this.auraEffect = config.scene.add.graphics();
+    this.add(this.auraEffect);
+    this.createAuraEffect();
+
+    // Shadow - 더 부드럽게
+    this.shadow = config.scene.add.ellipse(0, 5, 35, 12, 0x000000, 0.4);
     this.add(this.shadow);
 
-    // Create sprite
+    // Create sprite with better visuals
     this.sprite = config.scene.add.sprite(0, -5, config.texture);
     this.sprite.setOrigin(0.5, 1);
     this.sprite.setTint(this.color);
@@ -82,7 +90,55 @@ export class Enemy extends Phaser.GameObjects.Container {
     // Animation
     this.startAnimation();
 
+    // 스폰 이펙트
+    this.showSpawnEffect();
+
     config.scene.add.existing(this);
+  }
+
+  private createAuraEffect(): void {
+    if (this.enemyType === 'BOSS') {
+      // 보스 오오라
+      this.auraEffect.fillStyle(0xFF00FF, 0.15);
+      this.auraEffect.fillCircle(0, -20, 50);
+      this.auraEffect.fillStyle(0xFF00FF, 0.1);
+      this.auraEffect.fillCircle(0, -20, 65);
+
+      // 오오라 펄스 애니메이션
+      this.scene.tweens.add({
+        targets: this.auraEffect,
+        scaleX: 1.2,
+        scaleY: 1.2,
+        alpha: 0.5,
+        duration: 800,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    } else if (this.enemyType === 'FLYING') {
+      // 비행 유닛 빛
+      this.auraEffect.fillStyle(0x88FFFF, 0.1);
+      this.auraEffect.fillCircle(0, -30, 25);
+    } else if (this.enemyType === 'TELEPORT') {
+      // 순간이동 유닛 마법진
+      this.auraEffect.lineStyle(1, 0x00FFFF, 0.3);
+      this.auraEffect.strokeCircle(0, 0, 25);
+      this.auraEffect.strokeCircle(0, 0, 20);
+    }
+  }
+
+  private showSpawnEffect(): void {
+    const particleManager = getParticleManager();
+    particleManager?.showSpawnEffect(this.x, this.y, this.color, true);
+
+    // 페이드 인
+    this.setAlpha(0);
+    this.scene.tweens.add({
+      targets: this,
+      alpha: 1,
+      duration: 300,
+      ease: 'Power2',
+    });
   }
 
   private initializeByType(): void {
@@ -178,25 +234,47 @@ export class Enemy extends Phaser.GameObjects.Container {
 
   private updateHealthBar(): void {
     this.healthBar.clear();
-    const barWidth = this.enemyType === 'BOSS' ? 50 : 30;
-    const barHeight = this.enemyType === 'BOSS' ? 6 : 4;
+    const barWidth = this.enemyType === 'BOSS' ? 60 : 35;
+    const barHeight = this.enemyType === 'BOSS' ? 8 : 5;
     const x = -barWidth / 2;
-    const y = -this.sprite.height - 15;
+    const y = -this.sprite.height - 18;
 
-    // Background
-    this.healthBar.fillStyle(0x000000, 0.7);
-    this.healthBar.fillRect(x - 1, y - 1, barWidth + 2, barHeight + 2);
+    // Background with gradient effect
+    this.healthBar.fillStyle(0x000000, 0.8);
+    this.healthBar.fillRoundedRect(x - 2, y - 2, barWidth + 4, barHeight + 4, 3);
+
+    // Background bar
+    this.healthBar.fillStyle(0x330000, 0.9);
+    this.healthBar.fillRoundedRect(x, y, barWidth, barHeight, 2);
 
     // Health
     const healthPercent = this.currentHealth / this.maxHealth;
-    const healthColor = this.enemyType === 'BOSS' ? 0xFF00FF : 0xFF0000;
-    this.healthBar.fillStyle(healthColor);
-    this.healthBar.fillRect(x, y, barWidth * healthPercent, barHeight);
-
-    // Boss name
+    let healthColor = 0xFF0000;
     if (this.enemyType === 'BOSS') {
-      this.healthBar.lineStyle(2, 0xFFD700);
-      this.healthBar.strokeRect(x - 2, y - 2, barWidth + 4, barHeight + 4);
+      healthColor = 0xFF00FF;
+    } else if (healthPercent > 0.6) {
+      healthColor = 0xFF4444;
+    } else if (healthPercent > 0.3) {
+      healthColor = 0xFF8800;
+    }
+
+    this.healthBar.fillStyle(healthColor);
+    this.healthBar.fillRoundedRect(x, y, barWidth * healthPercent, barHeight, 2);
+
+    // Shine effect
+    this.healthBar.fillStyle(0xFFFFFF, 0.3);
+    this.healthBar.fillRoundedRect(x, y, barWidth * healthPercent, barHeight / 3, 1);
+
+    // Boss special border
+    if (this.enemyType === 'BOSS') {
+      this.healthBar.lineStyle(2, 0xFFD700, 0.8);
+      this.healthBar.strokeRoundedRect(x - 2, y - 2, barWidth + 4, barHeight + 4, 3);
+
+      // Boss name tag
+      this.healthBar.fillStyle(0x000000, 0.7);
+      this.healthBar.fillRoundedRect(x - 5, y - 18, barWidth + 10, 14, 3);
+      this.healthBar.lineStyle(1, 0xFFD700, 0.5);
+      this.healthBar.strokeRoundedRect(x - 5, y - 18, barWidth + 10, 14, 3);
     }
   }
 
@@ -283,61 +361,133 @@ export class Enemy extends Phaser.GameObjects.Container {
   }
 
   public die(): void {
-    // Death effect
-    const deathEffect = this.scene.add.graphics();
-    deathEffect.setPosition(this.x, this.y - 20);
+    const particleManager = getParticleManager();
+
+    // 파티클 매니저로 사망 이펙트
+    particleManager?.showDeathExplosion(this.x, this.y - 20, this.color, this.enemyType === 'BOSS');
+
+    // 골드 획득 표시
+    particleManager?.showGoldGain(this.x, this.y - 30, this.goldReward);
 
     if (this.enemyType === 'BOSS') {
-      // 보스 사망 이펙트
+      // 보스 사망 - 화면 효과
+      this.scene.cameras.main.shake(500, 0.02);
+      this.scene.cameras.main.flash(300, 255, 200, 100);
+
+      // 거대한 폭발
+      for (let ring = 0; ring < 3; ring++) {
+        this.scene.time.delayedCall(ring * 150, () => {
+          const shockwave = this.scene.add.graphics();
+          shockwave.setPosition(this.x, this.y - 20);
+          shockwave.setDepth(9999);
+          shockwave.lineStyle(4 - ring, 0xFFD700, 0.8);
+          shockwave.strokeCircle(0, 0, 20);
+
+          this.scene.tweens.add({
+            targets: shockwave,
+            scaleX: 4 + ring,
+            scaleY: 4 + ring,
+            alpha: 0,
+            duration: 500,
+            onComplete: () => shockwave.destroy(),
+          });
+        });
+      }
+
+      // 보스 전용 골드 파티클 폭발
+      for (let i = 0; i < 25; i++) {
+        this.scene.time.delayedCall(i * 20, () => {
+          const gold = this.scene.add.graphics();
+          gold.setPosition(this.x, this.y - 20);
+          gold.setDepth(9998);
+          gold.fillStyle(0xFFD700, 1);
+          gold.fillCircle(0, 0, Phaser.Math.Between(4, 8));
+          gold.fillStyle(0xFFFFAA, 0.6);
+          gold.fillCircle(-2, -2, Phaser.Math.Between(2, 4));
+
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Phaser.Math.Between(50, 150);
+
+          this.scene.tweens.add({
+            targets: gold,
+            x: this.x + Math.cos(angle) * dist,
+            y: this.y - 20 + Math.sin(angle) * dist - 50,
+            alpha: 0,
+            duration: 800,
+            ease: 'Power2',
+            onComplete: () => gold.destroy(),
+          });
+        });
+      }
+
+      // 승리 텍스트
+      const victoryText = this.scene.add.text(this.x, this.y - 80, 'BOSS KILLED!', {
+        fontSize: '28px',
+        color: '#FFD700',
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 5,
+      }).setOrigin(0.5).setDepth(10000);
+
+      this.scene.tweens.add({
+        targets: victoryText,
+        y: victoryText.y - 50,
+        scaleX: 1.3,
+        scaleY: 1.3,
+        duration: 300,
+        yoyo: true,
+        hold: 800,
+        onComplete: () => {
+          this.scene.tweens.add({
+            targets: victoryText,
+            alpha: 0,
+            duration: 300,
+            onComplete: () => victoryText.destroy(),
+          });
+        },
+      });
+    } else {
+      // 일반 적 사망 - 가벼운 효과
+      const deathEffect = this.scene.add.graphics();
+      deathEffect.setPosition(this.x, this.y - 20);
+      deathEffect.setDepth(this.y + 10);
+      deathEffect.fillStyle(this.color, 0.8);
+      deathEffect.fillCircle(0, 0, 20);
+
+      this.scene.tweens.add({
+        targets: deathEffect,
+        alpha: 0,
+        scaleX: 2.5,
+        scaleY: 2.5,
+        duration: 300,
+        onComplete: () => deathEffect.destroy(),
+      });
+
+      // 파편
       for (let i = 0; i < 8; i++) {
-        const angle = (i / 8) * Math.PI * 2;
-        const particle = this.scene.add.graphics();
-        particle.setPosition(this.x, this.y - 20);
-        particle.fillStyle(0xFFD700, 1);
-        particle.fillCircle(0, 0, 10);
+        const fragment = this.scene.add.graphics();
+        fragment.setPosition(this.x, this.y - 20);
+        fragment.setDepth(this.y + 9);
+        fragment.fillStyle(this.color, 0.9);
+        fragment.fillCircle(0, 0, Phaser.Math.Between(2, 5));
+
+        const angle = (i / 8) * Math.PI * 2 + Math.random() * 0.5;
+        const dist = Phaser.Math.Between(20, 50);
 
         this.scene.tweens.add({
-          targets: particle,
-          x: this.x + Math.cos(angle) * 100,
-          y: this.y - 20 + Math.sin(angle) * 100,
+          targets: fragment,
+          x: this.x + Math.cos(angle) * dist,
+          y: this.y - 20 + Math.sin(angle) * dist,
           alpha: 0,
-          scale: 0.5,
-          duration: 800,
-          onComplete: () => particle.destroy(),
+          duration: 400,
+          ease: 'Power2',
+          onComplete: () => fragment.destroy(),
         });
       }
     }
 
-    deathEffect.fillStyle(this.color, 0.8);
-    deathEffect.fillCircle(0, 0, 25);
-    this.scene.tweens.add({
-      targets: deathEffect,
-      alpha: 0,
-      scale: 3,
-      duration: 400,
-      onComplete: () => deathEffect.destroy(),
-    });
-
-    // Gold particles
-    const goldCount = this.enemyType === 'BOSS' ? 15 : 5;
-    for (let i = 0; i < goldCount; i++) {
-      const particle = this.scene.add.graphics();
-      particle.setPosition(this.x, this.y - 20);
-      particle.fillStyle(0xFFD700, 1);
-      particle.fillCircle(0, 0, 5);
-
-      this.scene.tweens.add({
-        targets: particle,
-        x: particle.x + (Math.random() - 0.5) * 80,
-        y: particle.y - 40 - Math.random() * 40,
-        alpha: 0,
-        duration: 600 + Math.random() * 200,
-        ease: 'Power2',
-        onComplete: () => particle.destroy(),
-      });
-    }
-
     this.scene.tweens.killTweensOf(this.sprite);
+    this.scene.tweens.killTweensOf(this.auraEffect);
     this.destroy();
   }
 
@@ -363,6 +513,23 @@ export class Enemy extends Phaser.GameObjects.Container {
     if (this.special === 'regenerate' && this.currentHealth < this.maxHealth) {
       this.currentHealth = Math.min(this.maxHealth, this.currentHealth + 0.5);
       this.updateHealthBar();
+
+      // 재생 이펙트
+      if (Math.random() < 0.05) {
+        const healParticle = this.scene.add.graphics();
+        healParticle.setPosition(this.x + Phaser.Math.Between(-15, 15), this.y);
+        healParticle.setDepth(this.y + 5);
+        healParticle.fillStyle(0x00FF00, 0.7);
+        healParticle.fillCircle(0, 0, 3);
+
+        this.scene.tweens.add({
+          targets: healParticle,
+          y: healParticle.y - 25,
+          alpha: 0,
+          duration: 500,
+          onComplete: () => healParticle.destroy(),
+        });
+      }
     }
 
     const vx = (dx / distance) * this.speed * 0.016;
@@ -376,6 +543,72 @@ export class Enemy extends Phaser.GameObjects.Container {
       this.sprite.setFlipX(true);
     } else {
       this.sprite.setFlipX(false);
+    }
+
+    // 발자국/먼지 효과
+    this.createFootstepEffect();
+  }
+
+  private createFootstepEffect(): void {
+    const now = Date.now();
+    if (now - this.lastFootstepTime < 200) return;
+    this.lastFootstepTime = now;
+
+    if (this.isUnderground) {
+      // 땅굴 유닛 - 흙 입자
+      const dirt = this.scene.add.graphics();
+      dirt.setPosition(this.x, this.y + 5);
+      dirt.setDepth(this.y - 1);
+      dirt.fillStyle(0x8B4513, 0.5);
+      dirt.fillCircle(0, 0, 4);
+
+      this.scene.tweens.add({
+        targets: dirt,
+        y: dirt.y - 10,
+        alpha: 0,
+        scaleX: 0.5,
+        scaleY: 0.5,
+        duration: 300,
+        onComplete: () => dirt.destroy(),
+      });
+    } else if (this.enemyType === 'FLYING') {
+      // 비행 유닛 - 깃털/바람
+      if (Math.random() < 0.3) {
+        const feather = this.scene.add.graphics();
+        feather.setPosition(this.x, this.y - 30);
+        feather.setDepth(this.y - 1);
+        feather.fillStyle(0xFFFFFF, 0.4);
+        feather.fillEllipse(0, 0, 6, 3);
+
+        this.scene.tweens.add({
+          targets: feather,
+          y: feather.y + 40,
+          x: feather.x + Phaser.Math.Between(-20, 20),
+          alpha: 0,
+          rotation: Math.PI,
+          duration: 800,
+          onComplete: () => feather.destroy(),
+        });
+      }
+    } else if (this.enemyType !== 'TELEPORT') {
+      // 지상 유닛 - 먼지
+      if (Math.random() < 0.4) {
+        const dust = this.scene.add.graphics();
+        dust.setPosition(this.x + Phaser.Math.Between(-8, 8), this.y + 3);
+        dust.setDepth(this.y - 1);
+        dust.fillStyle(0x8B7355, 0.3);
+        dust.fillCircle(0, 0, Phaser.Math.Between(2, 4));
+
+        this.scene.tweens.add({
+          targets: dust,
+          y: dust.y - 8,
+          alpha: 0,
+          scaleX: 1.5,
+          scaleY: 1.5,
+          duration: 400,
+          onComplete: () => dust.destroy(),
+        });
+      }
     }
   }
 
