@@ -1,332 +1,270 @@
-// Game Constants
+import Phaser from 'phaser';
+
 export const GAME_WIDTH = 1280;
 export const GAME_HEIGHT = 720;
 
-// Map Configuration
-export const MAP_CENTER_X = GAME_WIDTH / 2;
-export const MAP_CENTER_Y = GAME_HEIGHT / 2;
-
-// Guardian Stone
-export const GUARDIAN_STONE = {
-  x: MAP_CENTER_X,
-  y: MAP_CENTER_Y,
-  health: 2000,
+export const PHYSICS = {
+  gravity: 1400,
+  playerSpeed: 260,
+  playerJumpPower: 580,
+  doubleJumpPower: 480,
+  maxFallSpeed: 900,
 };
 
-// 등급 시스템 (F ~ SSS)
-export const GRADES: { [key: string]: { color: number; name: string; chance: number; multiplier: number } } = {
-  F:   { color: 0x808080, name: 'F',   chance: 0.40,   multiplier: 1.0 },
-  E:   { color: 0x32CD32, name: 'E',   chance: 0.25,   multiplier: 1.3 },
-  D:   { color: 0x1E90FF, name: 'D',   chance: 0.15,   multiplier: 1.7 },
-  C:   { color: 0x9932CC, name: 'C',   chance: 0.10,   multiplier: 2.2 },
-  B:   { color: 0xFFA500, name: 'B',   chance: 0.05,   multiplier: 3.0 },
-  A:   { color: 0xFF4500, name: 'A',   chance: 0.03,   multiplier: 4.0 },
-  S:   { color: 0xFFD700, name: 'S',   chance: 0.015,  multiplier: 5.5 },
-  SS:  { color: 0xFF69B4, name: 'SS',  chance: 0.004,  multiplier: 8.0 },
-  SSS: { color: 0x00FFFF, name: 'SSS', chance: 0.001,  multiplier: 12.0 },
+export const PLAYER_STATS = {
+  maxHealth: 150,
+  healthRegen: 0.3,
+  baseAttack: 25,
+  defense: 5,
 };
 
-// 유닛 기본 스탯 (등급 multiplier 적용됨)
-export const BASE_UNIT_STATS = {
-  ARCHER: {
-    name: '궁수',
-    health: 50,
-    damage: 15,
-    attackSpeed: 1000,
-    range: 180,
-  },
-  MAGE: {
-    name: '마법사',
-    health: 40,
-    damage: 25,
-    attackSpeed: 1500,
-    range: 200,
-  },
-  KNIGHT: {
-    name: '기사',
-    health: 100,
-    damage: 20,
-    attackSpeed: 1200,
-    range: 100,
+export const LEVEL_CONFIG = {
+  baseExp: 80,
+  expMultiplier: 1.6,
+  statGrowth: {
+    health: 20,
+    attack: 4,
+    defense: 2,
   },
 };
 
-// 영웅 (이동 불가)
-export const UNIT_STATS = {
-  F_ARCHER: {
-    name: 'F급 궁수',
-    grade: 'F',
-    health: 50,
-    damage: 15,
-    attackSpeed: 1000,
-    range: 180,
+// 맵 타입
+export enum MapType {
+  VILLAGE = 'village',
+  FIELD = 'field',
+  BOSS = 'boss',
+}
+
+// 맵 설정
+export const MAP_CONFIG = {
+  [MapType.VILLAGE]: {
+    name: '네온 시티',
+    width: 1600,
+    groundY: 580,
+    hasMonsters: false,
+    hasBoss: false,
+    nextMap: MapType.FIELD,
+    portalX: 1500,
+    ambientColor: 0x1a1a2e,
   },
-  HERO: {
-    name: '수호왕',
-    grade: 'SSS',
-    health: 1000,
-    damage: 80,
-    attackSpeed: 600,
-    range: 250,
+  [MapType.FIELD]: {
+    name: '폐허 거리',
+    width: 2400,
+    groundY: 580,
+    hasMonsters: true,
+    hasBoss: false,
+    nextMap: MapType.BOSS,
+    portalX: 2300,
+    ambientColor: 0x16213e,
+  },
+  [MapType.BOSS]: {
+    name: '트롤왕의 영역',
+    width: 1600,
+    groundY: 580,
+    hasMonsters: false,
+    hasBoss: true,
+    nextMap: null,
+    portalX: null,
+    ambientColor: 0x0f0f23,
   },
 };
 
-// 적 타입 정의
-export type EnemyType = 'GROUND' | 'FLYING' | 'TUNNELING' | 'TELEPORT' | 'BOSS';
-
-// 적 스탯 (다양한 타입)
-export const ENEMY_STATS: { [key: string]: {
-  name: string;
-  health: number;
-  damage: number;
-  speed: number;
-  goldReward: number;
-  color: number;
-  type: EnemyType;
-  special?: string;
-}} = {
-  // 일반 지상 유닛
-  GOBLIN: {
-    name: '고블린',
-    health: 40,
-    damage: 8,
-    speed: 60,
-    goldReward: 5,
-    color: 0x2E8B57,
-    type: 'GROUND',
-  },
-  GOBLIN_WARRIOR: {
-    name: '고블린 전사',
-    health: 80,
-    damage: 15,
-    speed: 50,
-    goldReward: 10,
-    color: 0x228B22,
-    type: 'GROUND',
-  },
-  ORC: {
-    name: '오크',
-    health: 150,
-    damage: 25,
-    speed: 40,
-    goldReward: 20,
-    color: 0x556B2F,
-    type: 'GROUND',
-  },
-  ORC_BERSERKER: {
-    name: '오크 광전사',
-    health: 200,
-    damage: 40,
-    speed: 55,
-    goldReward: 35,
-    color: 0x8B0000,
-    type: 'GROUND',
-    special: 'enrage', // 체력 낮으면 속도/공격력 증가
-  },
-  TROLL: {
-    name: '트롤',
-    health: 400,
-    damage: 50,
-    speed: 30,
-    goldReward: 50,
-    color: 0x4A5D23,
-    type: 'GROUND',
-    special: 'regenerate', // 체력 재생
-  },
-
-  // 공중 유닛 (경로 무시, 직선 이동)
-  BAT: {
-    name: '박쥐',
-    health: 25,
-    damage: 5,
-    speed: 80,
-    goldReward: 8,
-    color: 0x4B0082,
-    type: 'FLYING',
-  },
-  HARPY: {
-    name: '하피',
+// 몬스터 타입
+export const MONSTER_TYPES = {
+  CYBER_SLIME: {
+    name: '사이버 슬라임',
     health: 60,
-    damage: 12,
-    speed: 70,
-    goldReward: 15,
-    color: 0x9400D3,
-    type: 'FLYING',
+    attack: 12,
+    exp: 25,
+    gold: 15,
+    color: 0x00ff88,
+    size: { width: 35, height: 30 },
+    speed: 60,
   },
-  DRAGON: {
-    name: '드래곤',
-    health: 300,
-    damage: 60,
-    speed: 45,
-    goldReward: 100,
-    color: 0xFF4500,
-    type: 'FLYING',
-    special: 'firebreath', // 범위 공격
+  DRONE: {
+    name: '경비 드론',
+    health: 45,
+    attack: 18,
+    exp: 30,
+    gold: 20,
+    color: 0xff4466,
+    size: { width: 40, height: 25 },
+    speed: 100,
   },
-
-  // 땅굴 유닛 (중간까지 경로 무시)
-  MOLE: {
-    name: '두더지',
-    health: 50,
-    damage: 10,
-    speed: 55,
-    goldReward: 12,
-    color: 0x8B4513,
-    type: 'TUNNELING',
-  },
-  SAND_WORM: {
-    name: '모래 지렁이',
-    health: 180,
-    damage: 35,
-    speed: 40,
-    goldReward: 40,
-    color: 0xD2691E,
-    type: 'TUNNELING',
-  },
-
-  // 순간이동 유닛 (랜덤하게 순간이동)
-  BLINKER: {
-    name: '블링커',
-    health: 35,
-    damage: 8,
-    speed: 45,
-    goldReward: 15,
-    color: 0x00CED1,
-    type: 'TELEPORT',
-    special: 'blink', // 주기적 순간이동
-  },
-  SHADOW: {
-    name: '그림자',
-    health: 70,
-    damage: 20,
+  MUTANT: {
+    name: '변이체',
+    health: 100,
+    attack: 22,
+    exp: 45,
+    gold: 30,
+    color: 0x9944ff,
+    size: { width: 45, height: 50 },
     speed: 50,
-    goldReward: 25,
-    color: 0x2F4F4F,
-    type: 'TELEPORT',
-    special: 'phase', // 공격 회피
   },
+};
 
-  // 보스
-  GOBLIN_KING: {
-    name: '고블린 왕',
-    health: 800,
-    damage: 60,
-    speed: 35,
-    goldReward: 200,
-    color: 0xFFD700,
-    type: 'BOSS',
-    special: 'summon', // 부하 소환
-  },
-  DEMON_LORD: {
-    name: '마왕',
+// 보스 설정
+export const BOSS_CONFIG = {
+  TROLL_KING: {
+    name: '트롤왕 그룬딕',
     health: 2000,
-    damage: 100,
-    speed: 25,
-    goldReward: 500,
-    color: 0x8B0000,
-    type: 'BOSS',
-    special: 'aura', // 주변 적 강화
+    attack: 45,
+    defense: 15,
+    exp: 500,
+    gold: 300,
+    size: { width: 120, height: 150 },
+    color: 0x44aa44,
+    phases: [
+      { healthPercent: 1.0, attackSpeed: 1.0, moveSpeed: 80 },
+      { healthPercent: 0.6, attackSpeed: 1.3, moveSpeed: 100 },
+      { healthPercent: 0.3, attackSpeed: 1.6, moveSpeed: 120 },
+    ],
   },
 };
 
-// 웨이브 설정 (난이도 상승)
-export const WAVE_CONFIG = {
-  startDelay: 2000,
-  waveInterval: 25000,
-  enemiesPerWave: 8,
-  enemySpawnInterval: 800,
-  difficultyScale: 1.15, // 웨이브당 난이도 증가
-  bossWaveInterval: 10, // 10웨이브마다 보스
+// 스킬 타입
+export const SKILL_TYPES = {
+  FIREBALL: {
+    name: '파이어볼',
+    key: 'CTRL',
+    manaCost: 8,
+    cooldown: 300,
+    damage: 30,
+    description: '화염구를 발사합니다',
+    color: 0xff6600,
+  },
+  GHOUL_SUMMON: {
+    name: '구울 소환',
+    key: 'Q',
+    manaCost: 0,
+    cooldown: 8000,
+    damage: 0,
+    duration: 60000,
+    maxCount: 3,
+    description: '구울을 소환합니다 (1분간 지속)',
+    color: 0x664488,
+  },
+  BONE_SPIKE: {
+    name: '뼈가시',
+    key: 'W',
+    manaCost: 35,
+    cooldown: 4000,
+    damage: 45,
+    description: '관통하는 뼈가시를 발사합니다',
+    color: 0xffffcc,
+  },
+  CORPSE_BOMB: {
+    name: '시체 폭탄',
+    key: 'E',
+    manaCost: 50,
+    cooldown: 6000,
+    damage: 80,
+    radius: 120,
+    description: '범위 폭발을 일으킵니다',
+    color: 0x88ff44,
+  },
+  GIANT_GHOUL: {
+    name: '거대 구울',
+    key: 'R',
+    manaCost: 100,
+    cooldown: 60000,
+    damage: 0,
+    duration: 20000,
+    description: '강력한 거대 구울을 소환합니다',
+    color: 0x663399,
+  },
+  DARK_SHIELD: {
+    name: '암흑 보호막',
+    key: 'A',
+    manaCost: 30,
+    cooldown: 15000,
+    duration: 8000,
+    damageReduction: 0.5,
+    description: '받는 피해를 50% 감소시킵니다',
+    color: 0x4444aa,
+  },
+  CURSE: {
+    name: '저주',
+    key: 'S',
+    manaCost: 25,
+    cooldown: 10000,
+    duration: 6000,
+    debuffAmount: 0.3,
+    description: '적의 공격력을 30% 감소시킵니다',
+    color: 0x660066,
+  },
+  SOUL_DRAIN: {
+    name: '영혼 흡수',
+    key: 'D',
+    manaCost: 45,
+    cooldown: 12000,
+    damage: 60,
+    healPercent: 0.5,
+    description: '적에게 피해를 주고 체력을 흡수합니다',
+    color: 0x00ffcc,
+  },
+  DEATH_WAVE: {
+    name: '죽음의 파동',
+    key: 'F',
+    manaCost: 60,
+    cooldown: 20000,
+    damage: 100,
+    radius: 200,
+    description: '주변 모든 적에게 피해를 줍니다',
+    color: 0x220022,
+  },
 };
 
-// 경제
-export const ECONOMY = {
-  startingGold: 150,
-  randomUnitCost: 50,
-  randomCardCost: 30,
+// 소환수 설정
+export const SUMMON_CONFIG = {
+  GHOUL: {
+    health: 120,
+    attack: 25,
+    speed: 140,
+    attackRange: 60,
+    detectRange: 250,
+    color: 0x664488,
+    lifetime: 60000, // 1분
+  },
+  GIANT_GHOUL: {
+    health: 500,
+    attack: 60,
+    speed: 120,
+    attackRange: 80,
+    detectRange: 300,
+    color: 0x553388,
+    lifetime: 60000, // 1분
+  },
 };
 
-// 색상
-export const COLORS = {
-  WALL: 0x4A4A4A,
-  WALL_STROKE: 0x2A2A2A,
-  OUTER_WALL: 0x5C5C5C,
-  INNER_WALL: 0x3C3C3C,
-  GROUND: 0x2D4A3E,
-  GROUND_INNER: 0x3D5A4E,
-  GATE_HEALTH: 0x00FF00,
-  GATE_DAMAGE: 0xFF0000,
-  GUARDIAN_GLOW: 0x00FFFF,
-  UI_PANEL: 0x1a1a2e,
-  UI_BORDER: 0x4a4a6e,
-  GOLD: 0xFFD700,
+// 키 설정
+export const KEY_CONFIG = {
+  left: 'LEFT',
+  right: 'RIGHT',
+  jump: 'SPACE',
+  attack: 'CTRL',
+  skill_q: 'Q',
+  skill_w: 'W',
+  skill_e: 'E',
+  skill_r: 'R',
+  skill_a: 'A',
+  skill_s: 'S',
+  skill_d: 'D',
+  skill_f: 'F',
 };
 
-// 랜덤 등급 뽑기
-export function getRandomGrade(): string {
-  const rand = Math.random();
-  let cumulative = 0;
-
-  for (const [grade, data] of Object.entries(GRADES)) {
-    cumulative += data.chance;
-    if (rand < cumulative) {
-      return grade;
-    }
-  }
-  return 'F';
-}
-
-// 등급에 따른 유닛 스탯 생성
-export function generateUnitStats(grade: string) {
-  const gradeData = GRADES[grade];
-  const baseTypes = ['ARCHER', 'MAGE', 'KNIGHT'];
-  const baseType = baseTypes[Math.floor(Math.random() * baseTypes.length)];
-  const base = BASE_UNIT_STATS[baseType as keyof typeof BASE_UNIT_STATS];
-  const mult = gradeData.multiplier;
-
-  return {
-    name: `${grade}급 ${base.name}`,
-    grade: grade,
-    health: Math.floor(base.health * mult),
-    damage: Math.floor(base.damage * mult),
-    attackSpeed: Math.max(300, Math.floor(base.attackSpeed / (1 + (mult - 1) * 0.3))),
-    range: Math.floor(base.range * (1 + (mult - 1) * 0.2)),
-    type: baseType,
-  };
-}
-
-// 웨이브에 따른 적 선택
-export function getEnemyForWave(wave: number): string {
-  const isBossWave = wave % WAVE_CONFIG.bossWaveInterval === 0 && wave > 0;
-
-  if (isBossWave) {
-    return wave >= 20 ? 'DEMON_LORD' : 'GOBLIN_KING';
-  }
-
-  // 웨이브에 따라 다양한 적 등장
-  const enemies: { type: string; minWave: number; weight: number }[] = [
-    { type: 'GOBLIN', minWave: 1, weight: 40 },
-    { type: 'GOBLIN_WARRIOR', minWave: 3, weight: 25 },
-    { type: 'BAT', minWave: 4, weight: 20 },
-    { type: 'ORC', minWave: 6, weight: 15 },
-    { type: 'MOLE', minWave: 7, weight: 15 },
-    { type: 'HARPY', minWave: 8, weight: 12 },
-    { type: 'BLINKER', minWave: 10, weight: 10 },
-    { type: 'ORC_BERSERKER', minWave: 12, weight: 10 },
-    { type: 'SAND_WORM', minWave: 14, weight: 8 },
-    { type: 'SHADOW', minWave: 15, weight: 8 },
-    { type: 'TROLL', minWave: 18, weight: 6 },
-    { type: 'DRAGON', minWave: 25, weight: 4 },
-  ];
-
-  const available = enemies.filter(e => wave >= e.minWave);
-  const totalWeight = available.reduce((sum, e) => sum + e.weight, 0);
-  let rand = Math.random() * totalWeight;
-
-  for (const enemy of available) {
-    rand -= enemy.weight;
-    if (rand <= 0) return enemy.type;
-  }
-
-  return 'GOBLIN';
-}
+export const gameConfig: Phaser.Types.Core.GameConfig = {
+  type: Phaser.AUTO,
+  width: GAME_WIDTH,
+  height: GAME_HEIGHT,
+  parent: 'game-container',
+  backgroundColor: 0x0a0a15,
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+  render: {
+    pixelArt: true,
+    antialias: false,
+  },
+};

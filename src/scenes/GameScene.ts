@@ -1,1138 +1,841 @@
 import Phaser from 'phaser';
-import {
-  GAME_WIDTH,
-  GAME_HEIGHT,
-  MAP_CENTER_X,
-  MAP_CENTER_Y,
-  GUARDIAN_STONE,
-  UNIT_STATS,
-  ENEMY_STATS,
-  WAVE_CONFIG,
-  ECONOMY,
-  getRandomGrade,
-  generateUnitStats,
-  getEnemyForWave,
-  EnemyType,
-} from '../config/GameConfig';
-import {
-  ENEMY_PATHS,
-  GATE_INDICES,
-  PATH_WIDTH,
-  isPointOnPath,
-  OUTER_GATE_POSITIONS,
-  INNER_GATE_POSITIONS,
-  GATE_MAPPING,
-} from '../config/PathConfig';
-import { Unit } from '../entities/Unit';
-import { Enemy } from '../entities/Enemy';
-import { Gate } from '../entities/Gate';
-import { GuardianStone } from '../entities/GuardianStone';
-import { Projectile } from '../entities/Projectile';
-import { SoundManager, initSoundManager, getSoundManager } from '../utils/SoundManager';
-import { ParticleManager, initParticleManager, getParticleManager } from '../utils/ParticleManager';
+import { GAME_WIDTH, GAME_HEIGHT, MAP_CONFIG, MapType, MONSTER_TYPES, KEY_CONFIG } from '../config/GameConfig';
+import { Player } from '../entities/Player';
+import { Monster } from '../entities/Monster';
+import { TrollKing } from '../entities/TrollKing';
 
 export class GameScene extends Phaser.Scene {
-  // Game state
-  public gold: number = ECONOMY.startingGold;
-  public wave: number = 0;
-  public isGameOver: boolean = false;
+  public player!: Player;
+  public monsters: Monster[] = [];
+  public boss: TrollKing | null = null;
+  public projectiles: any[] = [];
+  public summons: any[] = [];
 
-  // Entities
-  public units: Unit[] = [];
-  public enemies: Enemy[] = [];
-  public outerGates: Map<string, Gate> = new Map();
-  public innerGates: Map<string, Gate> = new Map();
-  public guardianStone!: GuardianStone;
-  public hero!: Unit;
+  private currentMap: MapType = MapType.VILLAGE;
+  private mapConfig: any;
+  private groundY: number = 580;
+  private platforms: any[] = [];
 
-  // Projectiles
-  private projectiles: Projectile[] = [];
+  // 입력
+  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private keys: any = {};
 
-  // Wave system
-  private waveTimer!: Phaser.Time.TimerEvent;
-  private spawnTimer: Phaser.Time.TimerEvent | null = null;
+  // 배경
+  private backgrounds: Phaser.GameObjects.Graphics[] = [];
+  private neonLights: Phaser.GameObjects.Graphics[] = [];
 
-  // Graphics
-  private mapGraphics!: Phaser.GameObjects.Graphics;
-  private pathGraphics!: Phaser.GameObjects.Graphics;
-  private ambientGraphics!: Phaser.GameObjects.Graphics;
-  private lightingGraphics!: Phaser.GameObjects.Graphics;
+  // 포탈
+  private portal: Phaser.GameObjects.Container | null = null;
+  private portalActive: boolean = false;
 
-  // Sound & Particles
-  public soundManager!: SoundManager;
-  public particleManager!: ParticleManager;
-
-  // Decorations
-  private decorations: Phaser.GameObjects.Graphics[] = [];
-  private ambientParticles: Phaser.GameObjects.Graphics[] = [];
+  // NPC
+  private npc: Phaser.GameObjects.Container | null = null;
 
   constructor() {
     super({ key: 'GameScene' });
   }
 
   create(): void {
-    this.cameras.main.setBackgroundColor(0x0a1510);
+    this.mapConfig = MAP_CONFIG[this.currentMap];
+    this.groundY = this.mapConfig.groundY;
 
-    // Initialize managers
-    this.soundManager = initSoundManager(this);
-    this.particleManager = initParticleManager(this);
-
-    // Resume audio on first interaction
-    this.input.once('pointerdown', () => {
-      this.soundManager.resumeAudioContext();
-    });
-
-    this.drawMap();
-    this.drawEnvironmentDecorations();
-    this.drawOuterWalls();
-    this.drawInnerWalls();
-    this.drawPaths();
-    this.createGates();
-    this.createGuardianStone();
-    this.createInitialUnits();
+    this.createBackground();
+    this.createPlatforms();
+    this.createPlayer();
+    this.setupInput();
+    this.setupCamera();
     this.setupEventListeners();
-    this.startWaveSystem();
-    this.createAmbientEffects();
-    this.createLightingEffects();
 
-    // Depth sorting
-    this.time.addEvent({
-      delay: 100,
-      callback: this.sortDepths,
-      callbackScope: this,
-      loop: true,
-    });
+    if (this.currentMap === MapType.VILLAGE) {
+      this.createVillageNPC();
+    }
+
+    this.createPortal();
+    this.spawnMonsters();
+
+    // 파티클 이펙트
+    this.createAmbientEffects();
   }
 
-  // 환경 장식 그리기 (나무, 바위, 풀 등)
-  private drawEnvironmentDecorations(): void {
-    // 성벽 바깥 숲 (나무들)
-    const treePositions = [
-      { x: 30, y: 50 }, { x: 60, y: 30 }, { x: 20, y: 120 },
-      { x: 50, y: 180 }, { x: 25, y: 280 }, { x: 45, y: 380 },
-      { x: 30, y: 480 }, { x: 55, y: 550 }, { x: 20, y: 620 },
-      { x: GAME_WIDTH - 30, y: 50 }, { x: GAME_WIDTH - 60, y: 100 },
-      { x: GAME_WIDTH - 25, y: 200 }, { x: GAME_WIDTH - 50, y: 320 },
-      { x: GAME_WIDTH - 35, y: 450 }, { x: GAME_WIDTH - 55, y: 580 },
-      { x: 150, y: 25 }, { x: 300, y: 35 }, { x: 450, y: 20 },
-      { x: 600, y: 30 }, { x: 750, y: 25 }, { x: 900, y: 35 },
-      { x: 150, y: GAME_HEIGHT - 25 }, { x: 350, y: GAME_HEIGHT - 35 },
-      { x: 550, y: GAME_HEIGHT - 20 }, { x: 750, y: GAME_HEIGHT - 30 },
-    ];
+  private createBackground(): void {
+    const width = this.mapConfig.width;
+    const ambientColor = this.mapConfig.ambientColor;
 
-    treePositions.forEach(pos => this.drawTree(pos.x, pos.y, Phaser.Math.Between(15, 25)));
+    // 기본 배경
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(ambientColor, ambientColor, 0x000011, 0x000011);
+    bg.fillRect(0, 0, width, GAME_HEIGHT);
+    bg.setScrollFactor(0.1);
+    this.backgrounds.push(bg);
 
-    // 성벽 안쪽 장식 (작은 관목, 돌)
-    for (let i = 0; i < 30; i++) {
-      const x = Phaser.Math.Between(100, GAME_WIDTH - 100);
-      const y = Phaser.Math.Between(100, GAME_HEIGHT - 100);
+    // 사이버펑크 도시 스카이라인
+    const skyline = this.add.graphics();
+    skyline.setScrollFactor(0.3);
 
-      // 경로 위가 아닌 곳에만
-      if (!isPointOnPath(x, y)) {
-        const dist = Math.sqrt(Math.pow(x - MAP_CENTER_X, 2) + Math.pow(y - MAP_CENTER_Y, 2));
-        if (dist > 220) { // 내성 밖에만
-          if (Math.random() > 0.5) {
-            this.drawBush(x, y);
-          } else {
-            this.drawRock(x, y);
+    // 뒷 건물들
+    for (let i = 0; i < width / 100; i++) {
+      const buildingHeight = 150 + Math.random() * 200;
+      const buildingX = i * 100;
+      const buildingWidth = 60 + Math.random() * 30;
+
+      // 건물 본체
+      skyline.fillStyle(0x111122);
+      skyline.fillRect(buildingX, GAME_HEIGHT - buildingHeight - 100, buildingWidth, buildingHeight);
+
+      // 창문 (네온)
+      const windowColors = [0x00ffff, 0xff00ff, 0xffff00, 0x00ff00];
+      for (let j = 0; j < buildingHeight / 20; j++) {
+        for (let k = 0; k < buildingWidth / 15; k++) {
+          if (Math.random() > 0.3) {
+            skyline.fillStyle(windowColors[Math.floor(Math.random() * windowColors.length)], 0.6);
+            skyline.fillRect(buildingX + 5 + k * 15, GAME_HEIGHT - buildingHeight - 90 + j * 20, 8, 12);
           }
         }
       }
     }
+    this.backgrounds.push(skyline);
 
-    // 잔디 패치
-    for (let i = 0; i < 50; i++) {
-      const x = Phaser.Math.Between(90, GAME_WIDTH - 90);
-      const y = Phaser.Math.Between(90, GAME_HEIGHT - 90);
-      if (!isPointOnPath(x, y)) {
-        this.drawGrassPatch(x, y);
-      }
-    }
-  }
+    // 앞쪽 건물들
+    const buildings = this.add.graphics();
+    buildings.setScrollFactor(0.5);
 
-  private drawTree(x: number, y: number, size: number): void {
-    const tree = this.add.graphics();
-    tree.setPosition(x, y);
-    tree.setDepth(1);
+    for (let i = 0; i < width / 80; i++) {
+      const buildingHeight = 100 + Math.random() * 150;
+      const buildingX = i * 80 + Math.random() * 20;
+      const buildingWidth = 50 + Math.random() * 20;
 
-    // 그림자
-    tree.fillStyle(0x000000, 0.3);
-    tree.fillEllipse(5, size + 5, size * 1.2, size * 0.4);
+      // 건물 본체
+      buildings.fillStyle(0x1a1a2e);
+      buildings.fillRect(buildingX, GAME_HEIGHT - buildingHeight - 50, buildingWidth, buildingHeight);
 
-    // 나무 기둥
-    tree.fillStyle(0x4a3728);
-    tree.fillRect(-size * 0.15, 0, size * 0.3, size);
-
-    // 나뭇잎 (여러 층)
-    const leafColors = [0x1a5a1a, 0x2a6a2a, 0x1a4a1a];
-    for (let i = 0; i < 3; i++) {
-      tree.fillStyle(leafColors[i]);
-      tree.fillCircle(0, -size * 0.3 - i * size * 0.25, size * (0.8 - i * 0.15));
-    }
-
-    // 하이라이트
-    tree.fillStyle(0x3a8a3a, 0.5);
-    tree.fillCircle(-size * 0.2, -size * 0.5, size * 0.3);
-
-    this.decorations.push(tree);
-  }
-
-  private drawBush(x: number, y: number): void {
-    const bush = this.add.graphics();
-    bush.setPosition(x, y);
-    bush.setDepth(y - 10);
-
-    // 그림자
-    bush.fillStyle(0x000000, 0.2);
-    bush.fillEllipse(3, 8, 20, 8);
-
-    // 관목
-    bush.fillStyle(0x2a5a2a);
-    bush.fillCircle(0, 0, 10);
-    bush.fillCircle(-6, 2, 7);
-    bush.fillCircle(6, 2, 7);
-
-    // 하이라이트
-    bush.fillStyle(0x4a8a4a, 0.5);
-    bush.fillCircle(-2, -3, 4);
-
-    this.decorations.push(bush);
-  }
-
-  private drawRock(x: number, y: number): void {
-    const rock = this.add.graphics();
-    rock.setPosition(x, y);
-    rock.setDepth(y - 10);
-
-    // 그림자
-    rock.fillStyle(0x000000, 0.3);
-    rock.fillEllipse(3, 8, 18, 6);
-
-    // 바위
-    rock.fillStyle(0x5a5a5a);
-    rock.fillEllipse(0, 0, 14, 10);
-
-    // 하이라이트
-    rock.fillStyle(0x7a7a7a, 0.6);
-    rock.fillEllipse(-3, -2, 6, 4);
-
-    // 어두운 부분
-    rock.fillStyle(0x3a3a3a, 0.5);
-    rock.fillEllipse(3, 3, 5, 3);
-
-    this.decorations.push(rock);
-  }
-
-  private drawGrassPatch(x: number, y: number): void {
-    const grass = this.add.graphics();
-    grass.setPosition(x, y);
-    grass.setDepth(y - 20);
-
-    const blades = Phaser.Math.Between(3, 6);
-    for (let i = 0; i < blades; i++) {
-      const offsetX = Phaser.Math.Between(-8, 8);
-      const height = Phaser.Math.Between(6, 12);
-      const color = Phaser.Math.RND.pick([0x3a7a3a, 0x4a8a4a, 0x2a6a2a]);
-
-      grass.fillStyle(color, 0.8);
-      grass.fillTriangle(
-        offsetX - 2, 0,
-        offsetX + 2, 0,
-        offsetX + Phaser.Math.Between(-2, 2), -height
-      );
-    }
-
-    this.decorations.push(grass);
-  }
-
-  // 환경 조명 효과
-  private createLightingEffects(): void {
-    this.lightingGraphics = this.add.graphics();
-    this.lightingGraphics.setDepth(9000);
-    this.lightingGraphics.setBlendMode(Phaser.BlendModes.ADD);
-
-    // 중앙 수호석 빛
-    const gradient = this.lightingGraphics;
-    gradient.fillStyle(0x00FFFF, 0.05);
-    gradient.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 150);
-    gradient.fillStyle(0x00FFFF, 0.03);
-    gradient.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 200);
-
-    // 성문 주변 횃불 빛
-    Object.values(OUTER_GATE_POSITIONS).forEach(pos => {
-      gradient.fillStyle(0xFFAA00, 0.08);
-      gradient.fillCircle(pos.x - 30, pos.y, 40);
-      gradient.fillCircle(pos.x + 30, pos.y, 40);
-    });
-
-    // 코너 타워 빛
-    const corners = [
-      { x: 80, y: 80 }, { x: GAME_WIDTH - 80, y: 80 },
-      { x: 80, y: GAME_HEIGHT - 80 }, { x: GAME_WIDTH - 80, y: GAME_HEIGHT - 80 }
-    ];
-    corners.forEach(c => {
-      gradient.fillStyle(0xFFAA00, 0.06);
-      gradient.fillCircle(c.x, c.y - 20, 50);
-    });
-  }
-
-  // 환경 파티클 (먼지, 반딧불 등)
-  private createAmbientEffects(): void {
-    // 반딧불이
-    this.time.addEvent({
-      delay: 500,
-      callback: () => {
-        if (this.ambientParticles.length < 20) {
-          this.createFirefly();
+      // 창문
+      for (let j = 0; j < buildingHeight / 25; j++) {
+        for (let k = 0; k < buildingWidth / 12; k++) {
+          if (Math.random() > 0.4) {
+            const windowColor = Math.random() > 0.5 ? 0x00ffff : 0xff66ff;
+            buildings.fillStyle(windowColor, 0.5);
+            buildings.fillRect(buildingX + 3 + k * 12, GAME_HEIGHT - buildingHeight - 40 + j * 25, 6, 15);
+          }
         }
-      },
-      loop: true,
-    });
-
-    // 떨어지는 나뭇잎
-    this.time.addEvent({
-      delay: 2000,
-      callback: () => this.createFallingLeaf(),
-      loop: true,
-    });
-
-    // 먼지 입자
-    this.time.addEvent({
-      delay: 300,
-      callback: () => this.createDustParticle(),
-      loop: true,
-    });
-  }
-
-  private createFirefly(): void {
-    const x = Phaser.Math.Between(100, GAME_WIDTH - 100);
-    const y = Phaser.Math.Between(100, GAME_HEIGHT - 100);
-
-    const firefly = this.add.graphics();
-    firefly.setPosition(x, y);
-    firefly.setDepth(8000);
-    firefly.setBlendMode(Phaser.BlendModes.ADD);
-
-    const color = Phaser.Math.RND.pick([0xFFFF00, 0x00FF00, 0xAAFFAA]);
-    firefly.fillStyle(color, 0.8);
-    firefly.fillCircle(0, 0, 3);
-    firefly.fillStyle(color, 0.3);
-    firefly.fillCircle(0, 0, 8);
-
-    this.ambientParticles.push(firefly);
-
-    // 랜덤 움직임
-    const targetX = x + Phaser.Math.Between(-100, 100);
-    const targetY = y + Phaser.Math.Between(-100, 100);
-
-    this.tweens.add({
-      targets: firefly,
-      x: targetX,
-      y: targetY,
-      alpha: { from: 0.8, to: 0.2 },
-      duration: Phaser.Math.Between(3000, 6000),
-      ease: 'Sine.easeInOut',
-      yoyo: true,
-      repeat: 1,
-      onComplete: () => {
-        const idx = this.ambientParticles.indexOf(firefly);
-        if (idx > -1) this.ambientParticles.splice(idx, 1);
-        firefly.destroy();
-      },
-    });
-
-    // 깜빡임
-    this.tweens.add({
-      targets: firefly,
-      scaleX: 0.5,
-      scaleY: 0.5,
-      duration: 500,
-      yoyo: true,
-      repeat: -1,
-    });
-  }
-
-  private createFallingLeaf(): void {
-    const startX = Phaser.Math.Between(0, GAME_WIDTH);
-    const leaf = this.add.graphics();
-    leaf.setPosition(startX, -10);
-    leaf.setDepth(7500);
-
-    const leafColor = Phaser.Math.RND.pick([0x4a8a4a, 0x6a9a3a, 0x8a7a2a, 0x9a5a3a]);
-    leaf.fillStyle(leafColor, 0.7);
-    leaf.fillEllipse(0, 0, 8, 5);
-
-    // 나선형 낙하
-    const endX = startX + Phaser.Math.Between(-100, 100);
-    this.tweens.add({
-      targets: leaf,
-      x: endX,
-      y: GAME_HEIGHT + 20,
-      rotation: Math.PI * 4,
-      duration: Phaser.Math.Between(5000, 8000),
-      ease: 'Sine.easeInOut',
-      onUpdate: () => {
-        leaf.x += Math.sin(leaf.y * 0.02) * 0.5;
-      },
-      onComplete: () => leaf.destroy(),
-    });
-  }
-
-  private createDustParticle(): void {
-    const x = Phaser.Math.Between(100, GAME_WIDTH - 100);
-    const y = Phaser.Math.Between(100, GAME_HEIGHT - 100);
-
-    const dust = this.add.graphics();
-    dust.setPosition(x, y);
-    dust.setDepth(50);
-    dust.fillStyle(0xFFFFFF, 0.15);
-    dust.fillCircle(0, 0, Phaser.Math.Between(1, 3));
-
-    this.tweens.add({
-      targets: dust,
-      y: y - Phaser.Math.Between(20, 50),
-      alpha: 0,
-      duration: Phaser.Math.Between(2000, 4000),
-      onComplete: () => dust.destroy(),
-    });
-  }
-
-  private drawMap(): void {
-    this.mapGraphics = this.add.graphics();
-
-    // 배경 (성벽 바깥 - 어두운 숲) - 그라디언트 효과
-    this.mapGraphics.fillStyle(0x050a08);
-    this.mapGraphics.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-    // 숲 패턴 배경
-    for (let i = 0; i < 100; i++) {
-      const x = Phaser.Math.Between(0, GAME_WIDTH);
-      const y = Phaser.Math.Between(0, GAME_HEIGHT);
-      this.mapGraphics.fillStyle(0x0a150a, 0.5);
-      this.mapGraphics.fillCircle(x, y, Phaser.Math.Between(10, 30));
-    }
-
-    // 외성 내부 (잔디) - 그라디언트
-    this.mapGraphics.fillStyle(0x1a3a1a);
-    this.mapGraphics.fillRoundedRect(80, 80, GAME_WIDTH - 160, GAME_HEIGHT - 160, 20);
-
-    // 잔디 텍스처
-    for (let i = 0; i < 200; i++) {
-      const x = Phaser.Math.Between(90, GAME_WIDTH - 90);
-      const y = Phaser.Math.Between(90, GAME_HEIGHT - 90);
-      const color = Phaser.Math.RND.pick([0x1a4a1a, 0x2a5a2a, 0x1a3a1a]);
-      this.mapGraphics.fillStyle(color, 0.4);
-      this.mapGraphics.fillCircle(x, y, Phaser.Math.Between(5, 15));
-    }
-
-    // 내성 내부 - 여러 레이어로 깊이감
-    const innerRadius = 200;
-    this.mapGraphics.fillStyle(0x1a4a2a);
-    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, innerRadius + 10);
-    this.mapGraphics.fillStyle(0x2a5a3a);
-    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, innerRadius);
-    this.mapGraphics.fillStyle(0x3a6a4a, 0.5);
-    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, innerRadius - 20);
-
-    // 중앙 석판 - 정교한 디자인
-    // 외곽 링
-    this.mapGraphics.fillStyle(0x2a2a3a);
-    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 95);
-
-    // 장식 패턴
-    this.mapGraphics.lineStyle(2, 0x4a4a6a, 0.5);
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
-      const x1 = MAP_CENTER_X + Math.cos(angle) * 60;
-      const y1 = MAP_CENTER_Y + Math.sin(angle) * 60;
-      const x2 = MAP_CENTER_X + Math.cos(angle) * 90;
-      const y2 = MAP_CENTER_Y + Math.sin(angle) * 90;
-      this.mapGraphics.lineBetween(x1, y1, x2, y2);
-    }
-
-    // 메인 석판
-    this.mapGraphics.fillStyle(0x3a3a4a);
-    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 85);
-
-    // 내부 장식
-    this.mapGraphics.fillStyle(0x4a4a5a, 0.6);
-    this.mapGraphics.fillCircle(MAP_CENTER_X, MAP_CENTER_Y, 70);
-
-    // 마법진 패턴
-    this.mapGraphics.lineStyle(2, 0x00AAAA, 0.3);
-    this.mapGraphics.strokeCircle(MAP_CENTER_X, MAP_CENTER_Y, 60);
-    this.mapGraphics.strokeCircle(MAP_CENTER_X, MAP_CENTER_Y, 40);
-
-    // 룬 문자 위치
-    this.mapGraphics.lineStyle(1, 0x00FFFF, 0.4);
-    for (let i = 0; i < 12; i++) {
-      const angle = (i / 12) * Math.PI * 2;
-      const x = MAP_CENTER_X + Math.cos(angle) * 50;
-      const y = MAP_CENTER_Y + Math.sin(angle) * 50;
-      this.mapGraphics.fillStyle(0x00FFFF, 0.3);
-      this.mapGraphics.fillCircle(x, y, 4);
-    }
-
-    // 테두리
-    this.mapGraphics.lineStyle(4, 0x5a5a6a);
-    this.mapGraphics.strokeCircle(MAP_CENTER_X, MAP_CENTER_Y, 85);
-    this.mapGraphics.lineStyle(2, 0x6a6a7a);
-    this.mapGraphics.strokeCircle(MAP_CENTER_X, MAP_CENTER_Y, 90);
-  }
-
-  private drawOuterWalls(): void {
-    const wallColor = 0x4a4a4a;
-    const wallTopColor = 0x5a5a5a;
-    const wallThickness = 25;
-
-    // 외곽 성벽 - 사각형 형태로 11시, 1시, 5시, 7시에 문
-    // 상단 좌측 (11시 왼쪽)
-    this.drawWallSegment(80, 80, OUTER_GATE_POSITIONS.NORTH_WEST.x - 40, 80, wallThickness, 'horizontal');
-    // 상단 우측 (11시~1시 사이)
-    this.drawWallSegment(OUTER_GATE_POSITIONS.NORTH_WEST.x + 40, 80, OUTER_GATE_POSITIONS.NORTH_EAST.x - 40, 80, wallThickness, 'horizontal');
-    // 상단 우측 끝 (1시 오른쪽)
-    this.drawWallSegment(OUTER_GATE_POSITIONS.NORTH_EAST.x + 40, 80, GAME_WIDTH - 80, 80, wallThickness, 'horizontal');
-
-    // 하단 좌측 (7시 왼쪽)
-    this.drawWallSegment(80, GAME_HEIGHT - 80, OUTER_GATE_POSITIONS.SOUTH_WEST.x - 40, GAME_HEIGHT - 80, wallThickness, 'horizontal');
-    // 하단 중앙 (7시~5시 사이)
-    this.drawWallSegment(OUTER_GATE_POSITIONS.SOUTH_WEST.x + 40, GAME_HEIGHT - 80, OUTER_GATE_POSITIONS.SOUTH_EAST.x - 40, GAME_HEIGHT - 80, wallThickness, 'horizontal');
-    // 하단 우측 끝 (5시 오른쪽)
-    this.drawWallSegment(OUTER_GATE_POSITIONS.SOUTH_EAST.x + 40, GAME_HEIGHT - 80, GAME_WIDTH - 80, GAME_HEIGHT - 80, wallThickness, 'horizontal');
-
-    // 좌측 상단 (11시 위)
-    this.drawWallSegment(80, 80, 80, OUTER_GATE_POSITIONS.NORTH_WEST.y - 40, wallThickness, 'vertical');
-    // 좌측 중앙 (11시~7시 사이)
-    this.drawWallSegment(80, OUTER_GATE_POSITIONS.NORTH_WEST.y + 40, 80, OUTER_GATE_POSITIONS.SOUTH_WEST.y - 40, wallThickness, 'vertical');
-    // 좌측 하단 (7시 아래)
-    this.drawWallSegment(80, OUTER_GATE_POSITIONS.SOUTH_WEST.y + 40, 80, GAME_HEIGHT - 80, wallThickness, 'vertical');
-
-    // 우측 상단 (1시 위)
-    this.drawWallSegment(GAME_WIDTH - 80, 80, GAME_WIDTH - 80, OUTER_GATE_POSITIONS.NORTH_EAST.y - 40, wallThickness, 'vertical');
-    // 우측 중앙 (1시~5시 사이)
-    this.drawWallSegment(GAME_WIDTH - 80, OUTER_GATE_POSITIONS.NORTH_EAST.y + 40, GAME_WIDTH - 80, OUTER_GATE_POSITIONS.SOUTH_EAST.y - 40, wallThickness, 'vertical');
-    // 우측 하단 (5시 아래)
-    this.drawWallSegment(GAME_WIDTH - 80, OUTER_GATE_POSITIONS.SOUTH_EAST.y + 40, GAME_WIDTH - 80, GAME_HEIGHT - 80, wallThickness, 'vertical');
-
-    // 코너 타워
-    this.drawCornerTower(80, 80);
-    this.drawCornerTower(GAME_WIDTH - 80, 80);
-    this.drawCornerTower(GAME_WIDTH - 80, GAME_HEIGHT - 80);
-    this.drawCornerTower(80, GAME_HEIGHT - 80);
-  }
-
-  private drawInnerWalls(): void {
-    const wallThickness = 20;
-    const innerRadius = 200;
-
-    // 내성 벽 - 12시, 3시, 6시, 9시에 문이 있는 원형/다이아몬드 형태
-    // 12시 ~ 3시
-    this.drawWallArc(MAP_CENTER_X, MAP_CENTER_Y, innerRadius, -Math.PI / 2 + 0.4, 0 - 0.4, wallThickness);
-    // 3시 ~ 6시
-    this.drawWallArc(MAP_CENTER_X, MAP_CENTER_Y, innerRadius, 0 + 0.4, Math.PI / 2 - 0.4, wallThickness);
-    // 6시 ~ 9시
-    this.drawWallArc(MAP_CENTER_X, MAP_CENTER_Y, innerRadius, Math.PI / 2 + 0.4, Math.PI - 0.4, wallThickness);
-    // 9시 ~ 12시
-    this.drawWallArc(MAP_CENTER_X, MAP_CENTER_Y, innerRadius, Math.PI + 0.4, Math.PI * 1.5 - 0.4, wallThickness);
-  }
-
-  private drawWallArc(cx: number, cy: number, radius: number, startAngle: number, endAngle: number, thickness: number): void {
-    this.mapGraphics.lineStyle(thickness, 0x4a4a4a);
-    this.mapGraphics.beginPath();
-    this.mapGraphics.arc(cx, cy, radius, startAngle, endAngle);
-    this.mapGraphics.strokePath();
-
-    // 성벽 위 장식
-    this.mapGraphics.lineStyle(thickness - 10, 0x5a5a5a);
-    this.mapGraphics.beginPath();
-    this.mapGraphics.arc(cx, cy, radius, startAngle, endAngle);
-    this.mapGraphics.strokePath();
-  }
-
-  private drawWallSegment(x1: number, y1: number, x2: number, y2: number, thickness: number, direction: 'horizontal' | 'vertical'): void {
-    const wallColor = 0x4a4a4a;
-    const wallTopColor = 0x5a5a5a;
-    const wallDarkColor = 0x3a3a3a;
-
-    if (direction === 'horizontal') {
-      // Main wall body
-      this.mapGraphics.fillStyle(wallColor);
-      this.mapGraphics.fillRect(x1, y1 - thickness / 2, x2 - x1, thickness);
-
-      // Wall top
-      this.mapGraphics.fillStyle(wallTopColor);
-      this.mapGraphics.fillRect(x1, y1 - thickness / 2 - 5, x2 - x1, 8);
-
-      // Battlements
-      this.mapGraphics.fillStyle(0x6a6a6a);
-      for (let x = x1; x < x2 - 15; x += 30) {
-        this.mapGraphics.fillRect(x + 8, y1 - thickness / 2 - 15, 14, 12);
       }
-
-      // Shadow
-      this.mapGraphics.fillStyle(wallDarkColor, 0.6);
-      this.mapGraphics.fillRect(x1, y1 + thickness / 2, x2 - x1, 5);
-    } else {
-      // Main wall body
-      this.mapGraphics.fillStyle(wallColor);
-      this.mapGraphics.fillRect(x1 - thickness / 2, y1, thickness, y2 - y1);
-
-      // Wall side
-      this.mapGraphics.fillStyle(wallTopColor);
-      this.mapGraphics.fillRect(x1 - thickness / 2 - 5, y1, 8, y2 - y1);
-
-      // Battlements
-      this.mapGraphics.fillStyle(0x6a6a6a);
-      for (let y = y1; y < y2 - 15; y += 30) {
-        this.mapGraphics.fillRect(x1 - thickness / 2 - 15, y + 8, 12, 14);
-      }
-
-      // Shadow
-      this.mapGraphics.fillStyle(wallDarkColor, 0.6);
-      this.mapGraphics.fillRect(x1 + thickness / 2, y1, 5, y2 - y1);
     }
+    this.backgrounds.push(buildings);
+
+    // 네온 간판들
+    this.createNeonSigns();
+
+    // 지면
+    const ground = this.add.graphics();
+    // 바닥
+    ground.fillStyle(0x222233);
+    ground.fillRect(0, this.groundY, width, 200);
+    // 바닥 라인
+    ground.lineStyle(3, 0x00ffff, 0.5);
+    ground.beginPath();
+    ground.moveTo(0, this.groundY);
+    ground.lineTo(width, this.groundY);
+    ground.stroke();
+    // 바닥 패턴
+    for (let i = 0; i < width; i += 100) {
+      ground.fillStyle(0x333344, 0.5);
+      ground.fillRect(i, this.groundY + 5, 80, 5);
+    }
+    ground.setDepth(-1);
+    this.backgrounds.push(ground);
   }
 
-  private drawCornerTower(x: number, y: number): void {
-    const towerSize = 40;
-    const halfSize = towerSize / 2;
+  private createNeonSigns(): void {
+    const signTexts = ['CYBER', 'NEON', 'TOKYO', '2077', 'GAME', 'RPG'];
+    const colors = [0x00ffff, 0xff00ff, 0xffff00, 0x00ff00, 0xff4444];
 
-    // Tower base
-    this.mapGraphics.fillStyle(0x3a3a3a);
-    this.mapGraphics.fillRect(x - halfSize, y - halfSize, towerSize, towerSize);
+    for (let i = 0; i < this.mapConfig.width / 400; i++) {
+      const sign = this.add.graphics();
+      sign.setPosition(200 + i * 400, 150 + Math.random() * 100);
+      sign.setScrollFactor(0.6);
 
-    // Tower body
-    this.mapGraphics.fillStyle(0x4a4a4a);
-    this.mapGraphics.fillRect(x - halfSize + 3, y - halfSize - 8, towerSize - 6, towerSize + 3);
+      const color = colors[Math.floor(Math.random() * colors.length)];
 
-    // Tower top
-    this.mapGraphics.fillStyle(0x5a5a5a);
-    this.mapGraphics.fillRect(x - halfSize - 2, y - halfSize - 12, towerSize + 4, 8);
+      // 네온 테두리
+      sign.lineStyle(4, color, 0.8);
+      sign.strokeRect(-40, -15, 80, 30);
 
-    // Battlements
-    this.mapGraphics.fillStyle(0x6a6a6a);
-    this.mapGraphics.fillRect(x - halfSize - 4, y - halfSize - 20, 10, 12);
-    this.mapGraphics.fillRect(x + halfSize - 6, y - halfSize - 20, 10, 12);
+      // 네온 글로우
+      sign.fillStyle(color, 0.2);
+      sign.fillRect(-45, -20, 90, 40);
 
-    // Flag
-    this.mapGraphics.fillStyle(0x8B0000);
-    this.mapGraphics.fillRect(x - 2, y - halfSize - 35, 4, 20);
-    this.mapGraphics.fillTriangle(x + 2, y - halfSize - 35, x + 2, y - halfSize - 22, x + 18, y - halfSize - 28);
-  }
+      this.neonLights.push(sign);
 
-  private drawPaths(): void {
-    this.pathGraphics = this.add.graphics();
-
-    // Draw each path
-    for (const pathKey of Object.keys(ENEMY_PATHS)) {
-      const path = ENEMY_PATHS[pathKey as keyof typeof ENEMY_PATHS];
-      this.drawSinglePath(path);
-    }
-  }
-
-  private drawSinglePath(waypoints: { x: number; y: number }[]): void {
-    // Path border (darker)
-    this.pathGraphics.lineStyle(PATH_WIDTH + 6, 0x2a2015, 0.5);
-    this.pathGraphics.beginPath();
-    this.pathGraphics.moveTo(waypoints[0].x, waypoints[0].y);
-    for (let i = 1; i < waypoints.length; i++) {
-      this.pathGraphics.lineTo(waypoints[i].x, waypoints[i].y);
-    }
-    this.pathGraphics.strokePath();
-
-    // Main path (dirt road)
-    this.pathGraphics.lineStyle(PATH_WIDTH, 0x3d3020, 0.7);
-    this.pathGraphics.beginPath();
-    this.pathGraphics.moveTo(waypoints[0].x, waypoints[0].y);
-    for (let i = 1; i < waypoints.length; i++) {
-      this.pathGraphics.lineTo(waypoints[i].x, waypoints[i].y);
-    }
-    this.pathGraphics.strokePath();
-
-    // Center line
-    this.pathGraphics.lineStyle(3, 0x4d4030, 0.4);
-    this.pathGraphics.beginPath();
-    this.pathGraphics.moveTo(waypoints[0].x, waypoints[0].y);
-    for (let i = 1; i < waypoints.length; i++) {
-      this.pathGraphics.lineTo(waypoints[i].x, waypoints[i].y);
-    }
-    this.pathGraphics.strokePath();
-  }
-
-  private createGates(): void {
-    // 외문 (11시, 1시, 5시, 7시)
-    for (const [key, pos] of Object.entries(OUTER_GATE_POSITIONS)) {
-      const gate = new Gate({
-        scene: this,
-        x: pos.x,
-        y: pos.y,
-        isOuter: true,
-        direction: key,
-        health: 200,
+      // 깜빡임 효과
+      this.tweens.add({
+        targets: sign,
+        alpha: 0.6,
+        duration: 500 + Math.random() * 500,
+        yoyo: true,
+        repeat: -1,
+        delay: Math.random() * 1000,
       });
-      gate.setDepth(pos.y);
-      this.outerGates.set(key, gate);
-    }
-
-    // 내문 (12시, 3시, 6시, 9시)
-    for (const [key, pos] of Object.entries(INNER_GATE_POSITIONS)) {
-      const gate = new Gate({
-        scene: this,
-        x: pos.x,
-        y: pos.y,
-        isOuter: false,
-        direction: key,
-        health: 150,
-      });
-      gate.setDepth(pos.y);
-      this.innerGates.set(key, gate);
     }
   }
 
-  private createGuardianStone(): void {
-    this.guardianStone = new GuardianStone({
-      scene: this,
-      x: GUARDIAN_STONE.x,
-      y: GUARDIAN_STONE.y,
-      health: GUARDIAN_STONE.health,
-    });
-    this.guardianStone.setDepth(GUARDIAN_STONE.y + 100);
+  private createPlatforms(): void {
+    this.platforms = [];
+
+    // 맵별 플랫폼
+    if (this.currentMap === MapType.VILLAGE) {
+      // 마을 - 건물 지붕 플랫폼
+      this.addPlatform(200, 450, 150);
+      this.addPlatform(500, 380, 120);
+      this.addPlatform(800, 420, 180);
+      this.addPlatform(1100, 350, 150);
+    } else if (this.currentMap === MapType.FIELD) {
+      // 필드 - 파괴된 차량, 잔해
+      this.addPlatform(300, 480, 100);
+      this.addPlatform(600, 420, 150);
+      this.addPlatform(900, 450, 120);
+      this.addPlatform(1200, 380, 180);
+      this.addPlatform(1500, 420, 140);
+      this.addPlatform(1800, 480, 100);
+      this.addPlatform(2100, 400, 160);
+    } else if (this.currentMap === MapType.BOSS) {
+      // 보스맵 - 아레나
+      this.addPlatform(300, 450, 200);
+      this.addPlatform(800, 400, 200);
+      this.addPlatform(1100, 450, 200);
+    }
   }
 
-  private createInitialUnits(): void {
-    // 각 외문 근처에 F급 활잡이 배치
-    for (const [key, pos] of Object.entries(OUTER_GATE_POSITIONS)) {
-      let validX = pos.x + 60;
-      let validY = pos.y;
+  private addPlatform(x: number, y: number, width: number): void {
+    const platform = this.add.graphics();
+    platform.setPosition(x, y);
 
-      // 경로 위가 아닌 곳 찾기
-      let attempts = 0;
-      while (isPointOnPath(validX, validY) && attempts < 30) {
-        validX += 20;
-        attempts++;
-      }
+    // 플랫폼 본체
+    platform.fillStyle(0x333344);
+    platform.fillRect(0, 0, width, 15);
 
-      const archer = new Unit({
-        scene: this,
-        x: validX,
-        y: validY,
-        texture: 'archer_f',
-        name: UNIT_STATS.F_ARCHER.name,
-        grade: UNIT_STATS.F_ARCHER.grade,
-        health: UNIT_STATS.F_ARCHER.health,
-        damage: UNIT_STATS.F_ARCHER.damage,
-        attackSpeed: UNIT_STATS.F_ARCHER.attackSpeed,
-        range: UNIT_STATS.F_ARCHER.range,
-      });
-      archer.setDepth(validY);
-      this.units.push(archer);
-    }
+    // 네온 엣지
+    platform.lineStyle(2, 0x00ffff, 0.6);
+    platform.beginPath();
+    platform.moveTo(0, 0);
+    platform.lineTo(width, 0);
+    platform.stroke();
 
-    // 왕 (수호석 옆, 이동 불가)
-    this.hero = new Unit({
-      scene: this,
-      x: GUARDIAN_STONE.x + 60,
-      y: GUARDIAN_STONE.y + 20,
-      texture: 'hero',
-      name: UNIT_STATS.HERO.name,
-      grade: UNIT_STATS.HERO.grade,
-      health: UNIT_STATS.HERO.health,
-      damage: UNIT_STATS.HERO.damage,
-      attackSpeed: UNIT_STATS.HERO.attackSpeed,
-      range: UNIT_STATS.HERO.range,
-      isMovable: false,
-    });
-    this.hero.setDepth(GUARDIAN_STONE.y + 50);
-    this.units.push(this.hero);
+    // 글로우
+    platform.fillStyle(0x00ffff, 0.1);
+    platform.fillRect(0, -5, width, 5);
+
+    platform.setDepth(y);
+
+    this.platforms.push({ x, y, width });
+  }
+
+  private createPlayer(): void {
+    this.player = new Player(this, 150, this.groundY - 50);
+  }
+
+  private setupInput(): void {
+    if (!this.input.keyboard) return;
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+
+    this.keys = {
+      space: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+      ctrl: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.CTRL),
+      q: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q),
+      w: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      e: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
+      r: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),
+      a: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+      s: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+      d: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+      f: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F),
+      up: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+    };
+  }
+
+  private setupCamera(): void {
+    this.cameras.main.setBounds(0, 0, this.mapConfig.width, GAME_HEIGHT);
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
   }
 
   private setupEventListeners(): void {
-    this.events.on('enemyKilled', (enemy: Enemy) => {
-      this.gold += enemy.goldReward;
-      this.events.emit('goldChanged', this.gold);
-      this.soundManager.playEnemyDeath();
-      this.soundManager.playGoldCollect();
+    // 스킬 히트 이벤트
+    this.events.on('boneSpikeHit', this.handleBoneSpikeHit, this);
+    this.events.on('corpseBombHit', this.handleCorpseBombHit, this);
+    this.events.on('curseHit', this.handleCurseHit, this);
+    this.events.on('soulDrainHit', this.handleSoulDrainHit, this);
+    this.events.on('deathWaveHit', this.handleDeathWaveHit, this);
 
-      const index = this.enemies.indexOf(enemy);
-      if (index > -1) {
-        this.enemies.splice(index, 1);
+    // 보스 처치
+    this.events.on('bossDefeated', (rewards: any) => {
+      this.player.gainExp(rewards.exp);
+      this.player.gainGold(rewards.gold);
+    });
+  }
+
+  private handleBoneSpikeHit(hitbox: Phaser.Geom.Rectangle, damage: number): void {
+    // 몬스터 체크
+    for (const monster of this.monsters) {
+      if (monster.isDead) continue;
+      const mHitbox = monster.getHitbox();
+      if (Phaser.Geom.Intersects.RectangleToRectangle(hitbox, mHitbox)) {
+        monster.takeDamage(damage, 0, this.time.now);
+        this.player.addCombo();
       }
-    });
-
-    this.events.on('gateDestroyed', (gate: Gate) => {
-      console.log(`Gate destroyed: ${gate.direction}`);
-      this.soundManager.playGateDestroyed();
-    });
-
-    this.events.on('guardianDestroyed', () => {
-      this.gameOver();
-    });
-
-    this.events.on('purchaseUnit', () => {
-      this.spawnRandomUnit();
-    });
-  }
-
-  private startWaveSystem(): void {
-    this.time.delayedCall(WAVE_CONFIG.startDelay, () => {
-      this.startNextWave();
-
-      this.waveTimer = this.time.addEvent({
-        delay: WAVE_CONFIG.waveInterval,
-        callback: this.startNextWave,
-        callbackScope: this,
-        loop: true,
-      });
-    });
-  }
-
-  private startNextWave(): void {
-    if (this.isGameOver) return;
-
-    this.wave++;
-    this.events.emit('waveStarted', this.wave);
-    this.soundManager.playWaveStart();
-
-    const enemyCount = WAVE_CONFIG.enemiesPerWave + Math.floor(this.wave * 1.5);
-
-    let spawned = 0;
-    this.spawnTimer = this.time.addEvent({
-      delay: WAVE_CONFIG.enemySpawnInterval,
-      callback: () => {
-        if (spawned < enemyCount && !this.isGameOver) {
-          this.spawnEnemy();
-          spawned++;
-        }
-      },
-      repeat: enemyCount - 1,
-    });
-  }
-
-  private spawnEnemy(): void {
-    // 랜덤 경로 선택
-    const pathKeys = Object.keys(ENEMY_PATHS) as (keyof typeof ENEMY_PATHS)[];
-    const pathKey = Phaser.Math.RND.pick(pathKeys);
-    const fullPath = ENEMY_PATHS[pathKey];
-
-    // 게이트 상태 확인
-    const outerGate = this.outerGates.get(pathKey);
-    const innerGateKey = GATE_MAPPING[pathKey as keyof typeof GATE_MAPPING];
-    const innerGate = this.innerGates.get(innerGateKey);
-
-    // 경로 끝 결정
-    let endIndex = fullPath.length - 1;
-
-    if (outerGate && !outerGate.isDestroyed) {
-      endIndex = GATE_INDICES.OUTER_GATE;
-    } else if (innerGate && !innerGate.isDestroyed) {
-      endIndex = GATE_INDICES.INNER_GATE;
     }
 
-    const path = fullPath.slice(0, endIndex + 1);
-
-    // 웨이브에 따른 적 타입 결정
-    const enemyTypeKey = getEnemyForWave(this.wave);
-    const enemyStats = ENEMY_STATS[enemyTypeKey];
-    const texture = enemyTypeKey.toLowerCase();
-
-    // 난이도 스케일링
-    const difficultyScale = Math.pow(WAVE_CONFIG.difficultyScale, this.wave - 1);
-    const healthMultiplier = difficultyScale;
-    const damageMultiplier = 1 + (this.wave - 1) * 0.08;
-
-    const spawnPoint = fullPath[0];
-
-    const enemy = new Enemy({
-      scene: this,
-      x: spawnPoint.x,
-      y: spawnPoint.y,
-      texture: texture,
-      name: enemyStats.name,
-      health: Math.floor(enemyStats.health * healthMultiplier),
-      damage: Math.floor(enemyStats.damage * damageMultiplier),
-      speed: enemyStats.speed,
-      goldReward: enemyStats.goldReward + Math.floor(this.wave / 2),
-      targetPath: path,
-      enemyType: enemyStats.type as EnemyType,
-      special: enemyStats.special,
-      color: enemyStats.color,
-    });
-
-    (enemy as any).pathKey = pathKey;
-    (enemy as any).innerGateKey = innerGateKey;
-
-    enemy.setDepth(spawnPoint.y);
-    this.enemies.push(enemy);
+    // 보스 체크
+    if (this.boss && !this.boss.isDead) {
+      const bHitbox = this.boss.getHitbox();
+      if (Phaser.Geom.Intersects.RectangleToRectangle(hitbox, bHitbox)) {
+        this.boss.takeDamage(damage, 0, this.time.now);
+        this.player.addCombo();
+      }
+    }
   }
 
-  private spawnRandomUnit(): void {
-    if (this.gold < ECONOMY.randomUnitCost) return;
+  private handleCorpseBombHit(hitbox: Phaser.Geom.Circle, damage: number): void {
+    // 몬스터 체크
+    for (const monster of this.monsters) {
+      if (monster.isDead) continue;
+      const mHitbox = monster.getHitbox();
+      if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, mHitbox)) {
+        monster.takeDamage(damage, monster.x > hitbox.x ? 1 : -1, this.time.now);
+        this.player.addCombo();
+      }
+    }
 
-    this.gold -= ECONOMY.randomUnitCost;
-    this.events.emit('goldChanged', this.gold);
+    // 보스 체크
+    if (this.boss && !this.boss.isDead) {
+      const bHitbox = this.boss.getHitbox();
+      if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, bHitbox)) {
+        this.boss.takeDamage(damage, this.boss.x > hitbox.x ? 1 : -1, this.time.now);
+        this.player.addCombo();
+      }
+    }
+  }
 
-    let x: number, y: number;
-    let attempts = 0;
+  private handleCurseHit(hitbox: Phaser.Geom.Circle, duration: number, debuffAmount: number): void {
+    // 보스에게 저주 적용
+    if (this.boss && !this.boss.isDead) {
+      const bHitbox = this.boss.getHitbox();
+      if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, bHitbox)) {
+        this.boss.applyCurse(duration, debuffAmount);
+      }
+    }
+  }
 
-    do {
-      x = MAP_CENTER_X + Phaser.Math.Between(-150, 150);
-      y = MAP_CENTER_Y + Phaser.Math.Between(-100, 100);
-      attempts++;
-    } while (isPointOnPath(x, y) && attempts < 50);
+  private handleSoulDrainHit(hitbox: Phaser.Geom.Rectangle, damage: number, healPercent: number, player: Player): void {
+    let totalDamage = 0;
 
-    // 랜덤 등급 결정
-    const grade = getRandomGrade();
-    const stats = generateUnitStats(grade);
+    // 몬스터 체크
+    for (const monster of this.monsters) {
+      if (monster.isDead) continue;
+      const mHitbox = monster.getHitbox();
+      if (Phaser.Geom.Intersects.RectangleToRectangle(hitbox, mHitbox)) {
+        monster.takeDamage(damage, 0, this.time.now);
+        totalDamage += damage;
+        this.player.addCombo();
+      }
+    }
 
-    // 등급에 따른 텍스처 결정
-    const textureMap: { [key: string]: string } = {
-      ARCHER: 'archer_f',
-      MAGE: 'mage',
-      KNIGHT: 'knight',
-    };
-    const texture = textureMap[stats.type] || 'archer_f';
+    // 보스 체크
+    if (this.boss && !this.boss.isDead) {
+      const bHitbox = this.boss.getHitbox();
+      if (Phaser.Geom.Intersects.RectangleToRectangle(hitbox, bHitbox)) {
+        this.boss.takeDamage(damage, 0, this.time.now);
+        totalDamage += damage;
+        this.player.addCombo();
+      }
+    }
 
-    const unit = new Unit({
-      scene: this,
-      x: x,
-      y: y,
-      texture: texture,
-      name: stats.name,
-      grade: stats.grade,
-      health: stats.health,
-      damage: stats.damage,
-      attackSpeed: stats.attackSpeed,
-      range: stats.range,
-    });
-    unit.setDepth(y);
-    this.units.push(unit);
-    this.soundManager.playUnitSummon();
+    // 흡수 치유
+    if (totalDamage > 0) {
+      player.heal(totalDamage * healPercent);
+    }
+  }
 
-    // 등급별 스폰 이펙트
-    const gradeColors: { [key: string]: number } = {
-      F: 0x808080,
-      E: 0x32CD32,
-      D: 0x1E90FF,
-      C: 0x9932CC,
-      B: 0xFFA500,
-      A: 0xFF4500,
-      S: 0xFFD700,
-      SS: 0xFF69B4,
-      SSS: 0x00FFFF,
-    };
-    const effectColor = gradeColors[grade] || 0xFFFFFF;
+  private handleDeathWaveHit(hitbox: Phaser.Geom.Circle, damage: number): void {
+    // 몬스터 체크
+    for (const monster of this.monsters) {
+      if (monster.isDead) continue;
+      const mHitbox = monster.getHitbox();
+      if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, mHitbox)) {
+        const dir = monster.x > hitbox.x ? 1 : -1;
+        monster.takeDamage(damage, dir, this.time.now);
+        this.player.addCombo();
+      }
+    }
 
-    // Spawn effect
-    const effect = this.add.graphics();
-    effect.setPosition(x, y);
-    effect.fillStyle(effectColor, 0.6);
-    effect.fillCircle(0, 0, 35);
-    effect.lineStyle(3, effectColor, 1);
-    effect.strokeCircle(0, 0, 40);
+    // 보스 체크
+    if (this.boss && !this.boss.isDead) {
+      const bHitbox = this.boss.getHitbox();
+      if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, bHitbox)) {
+        const dir = this.boss.x > hitbox.x ? 1 : -1;
+        this.boss.takeDamage(damage, dir, this.time.now);
+        this.player.addCombo();
+      }
+    }
+  }
+
+  private createVillageNPC(): void {
+    this.npc = this.add.container(400, this.groundY - 40);
+
+    // NPC 몸체
+    const body = this.add.graphics();
+
+    // 로브
+    body.fillStyle(0x4444aa);
+    body.fillRoundedRect(-15, -25, 30, 45, 5);
+
+    // 얼굴
+    body.fillStyle(0xffddcc);
+    body.fillCircle(0, -35, 12);
+
+    // 후드
+    body.fillStyle(0x333388);
+    body.fillTriangle(-15, -45, 0, -55, 15, -45);
+
+    // 눈
+    body.fillStyle(0x00ffff);
+    body.fillCircle(-4, -37, 3);
+    body.fillCircle(4, -37, 3);
+
+    this.npc.add(body);
+
+    // NPC 말풍선
+    const bubble = this.add.graphics();
+    bubble.fillStyle(0x000000, 0.8);
+    bubble.fillRoundedRect(-80, -90, 160, 40, 10);
+    bubble.fillTriangle(-5, -50, 5, -50, 0, -40);
+    this.npc.add(bubble);
+
+    const text = this.add.text(0, -70, '포탈로 모험을 떠나세요!', {
+      fontSize: '12px',
+      color: '#FFFFFF',
+    }).setOrigin(0.5);
+    this.npc.add(text);
+
+    this.npc.setDepth(this.groundY);
+
+    // 깜빡임
     this.tweens.add({
-      targets: effect,
-      alpha: 0,
-      scale: 2.5,
-      duration: 400,
-      onComplete: () => effect.destroy(),
+      targets: this.npc,
+      y: this.npc.y - 5,
+      duration: 1000,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
     });
+  }
 
-    // 높은 등급일 경우 추가 이펙트
-    if (['S', 'SS', 'SSS'].includes(grade)) {
-      this.cameras.main.flash(200, 255, 215, 0, false);
+  private createPortal(): void {
+    if (!this.mapConfig.portalX) return;
 
-      // 파티클 이펙트
-      for (let i = 0; i < 12; i++) {
+    this.portal = this.add.container(this.mapConfig.portalX, this.groundY - 60);
+    this.portalActive = true;
+
+    // 포탈 이펙트
+    const portalBase = this.add.graphics();
+
+    // 외곽 링
+    portalBase.lineStyle(4, 0x9944ff, 0.8);
+    portalBase.strokeEllipse(0, 0, 80, 120);
+
+    // 내부 소용돌이
+    portalBase.fillStyle(0x6633aa, 0.5);
+    portalBase.fillEllipse(0, 0, 60, 100);
+
+    portalBase.fillStyle(0x9955cc, 0.4);
+    portalBase.fillEllipse(0, 0, 40, 70);
+
+    portalBase.fillStyle(0xcc88ff, 0.3);
+    portalBase.fillEllipse(0, 0, 20, 40);
+
+    this.portal.add(portalBase);
+
+    // 포탈 파티클
+    this.time.addEvent({
+      delay: 100,
+      loop: true,
+      callback: () => {
+        if (!this.portal) return;
+
         const particle = this.add.graphics();
-        particle.setPosition(x, y);
-        particle.fillStyle(effectColor, 1);
-        particle.fillCircle(0, 0, 5);
+        particle.setPosition(this.portal.x, this.portal.y);
 
-        const angle = (i / 12) * Math.PI * 2;
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 30 + Math.random() * 20;
+        particle.x += Math.cos(angle) * dist;
+        particle.y += Math.sin(angle) * dist * 1.5;
+
+        particle.fillStyle(0x9944ff, 0.8);
+        particle.fillCircle(0, 0, 3 + Math.random() * 3);
+        particle.setDepth(this.groundY + 1);
+
         this.tweens.add({
           targets: particle,
-          x: x + Math.cos(angle) * 80,
-          y: y + Math.sin(angle) * 80,
+          x: this.portal!.x,
+          y: this.portal!.y,
           alpha: 0,
-          duration: 600,
-          ease: 'Power2',
+          duration: 500,
           onComplete: () => particle.destroy(),
         });
-      }
+      },
+    });
 
-      // 등급 텍스트 표시
-      const gradeText = this.add.text(x, y - 60, `★ ${grade}급 ★`, {
-        fontSize: '24px',
-        color: '#' + effectColor.toString(16).padStart(6, '0'),
-        fontStyle: 'bold',
-        stroke: '#000000',
-        strokeThickness: 4,
-      }).setOrigin(0.5);
+    // 포탈 회전 애니메이션
+    this.tweens.add({
+      targets: portalBase,
+      rotation: Math.PI * 2,
+      duration: 5000,
+      repeat: -1,
+    });
 
-      this.tweens.add({
-        targets: gradeText,
-        y: gradeText.y - 40,
-        alpha: 0,
-        duration: 1500,
-        onComplete: () => gradeText.destroy(),
-      });
-    }
-  }
-
-  private sortDepths(): void {
-    for (const unit of this.units) {
-      if (unit.active && !unit.isBeingDragged) {
-        unit.setDepth(unit.y);
-      }
-    }
-    for (const enemy of this.enemies) {
-      if (enemy.active) enemy.setDepth(enemy.y);
-    }
-  }
-
-  private gameOver(): void {
-    this.isGameOver = true;
-    this.soundManager.playGameOver();
-
-    if (this.waveTimer) this.waveTimer.destroy();
-    if (this.spawnTimer) this.spawnTimer.destroy();
-
-    const overlay = this.add.rectangle(MAP_CENTER_X, MAP_CENTER_Y, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.7);
-    overlay.setDepth(1000);
-
-    const gameOverText = this.add.text(MAP_CENTER_X, MAP_CENTER_Y - 50, 'GAME OVER', {
-      fontSize: '64px',
-      color: '#FF0000',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 6,
-    }).setOrigin(0.5);
-    gameOverText.setDepth(1001);
-
-    const waveText = this.add.text(MAP_CENTER_X, MAP_CENTER_Y + 30, `도달 웨이브: ${this.wave}`, {
-      fontSize: '32px',
+    // 맵 이름 표시
+    const nextMapName = this.mapConfig.nextMap ? (MAP_CONFIG as any)[this.mapConfig.nextMap].name : '';
+    const mapNameText = this.add.text(this.mapConfig.portalX, this.groundY - 140, `→ ${nextMapName}`, {
+      fontSize: '16px',
       color: '#FFFFFF',
       stroke: '#000000',
-      strokeThickness: 4,
+      strokeThickness: 3,
     }).setOrigin(0.5);
-    waveText.setDepth(1001);
 
-    const restartBtn = this.add.text(MAP_CENTER_X, MAP_CENTER_Y + 100, '다시 시작', {
-      fontSize: '28px',
-      color: '#FFD700',
-      backgroundColor: '#333333',
-      padding: { x: 20, y: 10 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    restartBtn.setDepth(1001);
+    this.portal.add(mapNameText);
+    this.portal.setDepth(this.groundY);
+  }
 
-    restartBtn.on('pointerover', () => restartBtn.setStyle({ color: '#FFFFFF' }));
-    restartBtn.on('pointerout', () => restartBtn.setStyle({ color: '#FFD700' }));
-    restartBtn.on('pointerdown', () => {
-      this.scene.restart();
-      this.scene.get('UIScene').scene.restart();
+  private spawnMonsters(): void {
+    if (!this.mapConfig.hasMonsters) return;
+
+    const monsterTypes = Object.keys(MONSTER_TYPES);
+
+    // 필드맵 몬스터 스폰
+    for (let i = 0; i < 8; i++) {
+      const typeKey = monsterTypes[Math.floor(Math.random() * monsterTypes.length)];
+      const type = (MONSTER_TYPES as any)[typeKey];
+      const x = 400 + i * 200 + Math.random() * 100;
+
+      const monster = new Monster(this, x, this.groundY - 30, type);
+      this.monsters.push(monster);
+    }
+
+    // 리스폰 타이머
+    this.time.addEvent({
+      delay: 10000,
+      loop: true,
+      callback: () => {
+        // 죽은 몬스터 정리
+        this.monsters = this.monsters.filter(m => !m.isDead);
+
+        // 몬스터 수 유지
+        if (this.monsters.length < 5 && this.mapConfig.hasMonsters) {
+          const typeKey = monsterTypes[Math.floor(Math.random() * monsterTypes.length)];
+          const type = (MONSTER_TYPES as any)[typeKey];
+          const x = this.cameras.main.scrollX + GAME_WIDTH + 100 + Math.random() * 200;
+
+          const monster = new Monster(this, x, this.groundY - 30, type);
+          this.monsters.push(monster);
+        }
+      },
+    });
+  }
+
+  private spawnBoss(): void {
+    if (!this.mapConfig.hasBoss || this.boss) return;
+
+    this.boss = new TrollKing(this, this.mapConfig.width - 300, this.groundY - 100);
+    this.boss.setTarget(this.player);
+  }
+
+  private createAmbientEffects(): void {
+    // 빗방울 효과
+    this.time.addEvent({
+      delay: 50,
+      loop: true,
+      callback: () => {
+        if (Math.random() > 0.7) {
+          const rain = this.add.graphics();
+          rain.setPosition(
+            this.cameras.main.scrollX + Math.random() * GAME_WIDTH,
+            0
+          );
+          rain.lineStyle(1, 0x6688aa, 0.3);
+          rain.beginPath();
+          rain.moveTo(0, 0);
+          rain.lineTo(5, 30);
+          rain.stroke();
+          rain.setDepth(-1);
+
+          this.tweens.add({
+            targets: rain,
+            y: GAME_HEIGHT,
+            x: rain.x + 20,
+            duration: 800,
+            onComplete: () => rain.destroy(),
+          });
+        }
+      },
+    });
+
+    // 네온 반짝임
+    this.time.addEvent({
+      delay: 2000,
+      loop: true,
+      callback: () => {
+        if (this.neonLights.length > 0) {
+          const light = this.neonLights[Math.floor(Math.random() * this.neonLights.length)];
+          this.tweens.add({
+            targets: light,
+            alpha: 0.3,
+            duration: 100,
+            yoyo: true,
+            repeat: 2,
+          });
+        }
+      },
+    });
+  }
+
+  private checkPortalCollision(): void {
+    if (!this.portal || !this.portalActive) return;
+
+    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.portal.x, this.portal.y);
+
+    if (dist < 50 && this.mapConfig.nextMap) {
+      this.transitionToMap(this.mapConfig.nextMap);
+    }
+  }
+
+  private transitionToMap(nextMap: MapType): void {
+    this.portalActive = false;
+
+    // 화면 페이드 아웃
+    this.cameras.main.fadeOut(500, 0, 0, 0);
+
+    this.time.delayedCall(500, () => {
+      // 현재 맵 정리
+      this.monsters.forEach(m => m.destroy());
+      this.monsters = [];
+      if (this.boss) {
+        this.boss.destroy();
+        this.boss = null;
+      }
+      this.backgrounds.forEach(b => b.destroy());
+      this.backgrounds = [];
+      this.neonLights.forEach(n => n.destroy());
+      this.neonLights = [];
+      if (this.portal) {
+        this.portal.destroy();
+        this.portal = null;
+      }
+      if (this.npc) {
+        this.npc.destroy();
+        this.npc = null;
+      }
+
+      // 플랫폼 정리
+      this.platforms = [];
+
+      // 새 맵 설정
+      this.currentMap = nextMap;
+      this.mapConfig = MAP_CONFIG[nextMap];
+      this.groundY = this.mapConfig.groundY;
+
+      // 새 맵 생성
+      this.createBackground();
+      this.createPlatforms();
+      this.createPortal();
+
+      if (nextMap === MapType.BOSS) {
+        this.spawnBoss();
+      } else {
+        this.spawnMonsters();
+      }
+
+      // 플레이어 위치 리셋
+      this.player.x = 150;
+      this.player.y = this.groundY - 50;
+
+      // 카메라 재설정
+      this.setupCamera();
+
+      // 화면 페이드 인
+      this.cameras.main.fadeIn(500, 0, 0, 0);
+
+      // 맵 이름 표시
+      const mapName = this.add.text(GAME_WIDTH / 2, 100, this.mapConfig.name, {
+        fontSize: '36px',
+        color: '#FFFFFF',
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 5,
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(1000);
+
+      this.tweens.add({
+        targets: mapName,
+        alpha: 0,
+        duration: 500,
+        delay: 2000,
+        onComplete: () => mapName.destroy(),
+      });
     });
   }
 
   update(time: number, delta: number): void {
-    if (this.isGameOver) return;
+    // 입력 처리
+    this.handleInput();
 
-    // Update units
-    for (const unit of this.units) {
-      if (!unit.active) continue;
+    // 플레이어 업데이트
+    this.player.update(time, delta, this.groundY, this.platforms);
 
-      unit.update(time, this.enemies);
+    // 맵 경계
+    this.player.x = Phaser.Math.Clamp(this.player.x, 30, this.mapConfig.width - 30);
 
-      if (unit.target && unit.attack(time)) {
-        const projectile = new Projectile({
-          scene: this,
-          x: unit.x,
-          y: unit.y - 20,
-          target: unit.target as Enemy,
-          damage: unit.damage,
-        });
-        this.projectiles.push(projectile);
-        this.soundManager.playArrowShoot();
+    // 몬스터 업데이트
+    for (const monster of this.monsters) {
+      if (!monster.isDead) {
+        monster.update(time, delta, this.summons);
+
+        // 플레이어 충돌
+        const mHitbox = monster.getHitbox();
+        const pHitbox = this.player.getHitbox();
+        if (Phaser.Geom.Intersects.RectangleToRectangle(mHitbox, pHitbox)) {
+          this.player.takeDamage(monster.attack, time);
+        }
+
+        // 몬스터 사망 처리
+        if (monster.isDead) {
+          this.player.gainExp(monster.expReward);
+          this.player.gainGold(monster.goldReward);
+        }
       }
     }
 
-    // Update enemies
-    for (const enemy of this.enemies) {
-      if (!enemy.active) continue;
-
-      enemy.update(time);
-
-      if (enemy.hasReachedEnd()) {
-        this.handleEnemyAttack(enemy, time);
-      }
+    // 보스 업데이트
+    if (this.boss && !this.boss.isDead) {
+      this.boss.update(time, delta, this.groundY, this.summons);
     }
 
-    // Update projectiles
+    // 투사체 업데이트
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
-      const projectile = this.projectiles[i];
-      if (!projectile.active) {
-        this.projectiles.splice(i, 1);
-        continue;
+      const proj = this.projectiles[i];
+      if (proj.update) proj.update();
+
+      // 몬스터 충돌
+      if (proj.getHitbox) {
+        const projHitbox = proj.getHitbox();
+
+        for (const monster of this.monsters) {
+          if (monster.isDead) continue;
+          const mHitbox = monster.getHitbox();
+          if (Phaser.Geom.Intersects.RectangleToRectangle(projHitbox, mHitbox)) {
+            const dir = monster.x > proj.graphics.x ? 1 : -1;
+            monster.takeDamage(proj.damage, dir, time);
+            this.player.addCombo();
+            if (proj.destroy) proj.destroy();
+            this.projectiles.splice(i, 1);
+            break;
+          }
+        }
+
+        // 보스 충돌
+        if (this.boss && !this.boss.isDead && this.projectiles[i]) {
+          const bHitbox = this.boss.getHitbox();
+          if (Phaser.Geom.Intersects.RectangleToRectangle(projHitbox, bHitbox)) {
+            const dir = this.boss.x > proj.graphics.x ? 1 : -1;
+            this.boss.takeDamage(proj.damage, dir, time);
+            this.player.addCombo();
+            if (proj.destroy) proj.destroy();
+            this.projectiles.splice(i, 1);
+          }
+        }
       }
-      projectile.update(delta);
+
+      // 비활성 투사체 정리
+      if (proj.graphics && !proj.graphics.active) {
+        this.projectiles.splice(i, 1);
+      }
     }
 
-    // Clean up
-    this.units = this.units.filter((u) => u.active);
-    this.enemies = this.enemies.filter((e) => e.active);
-    this.projectiles = this.projectiles.filter((p) => p.active);
+    // 소환수 업데이트
+    const enemies: any[] = [...this.monsters];
+    if (this.boss && !this.boss.isDead) enemies.push(this.boss);
+
+    for (let i = this.summons.length - 1; i >= 0; i--) {
+      const summon = this.summons[i];
+      if (summon.isAlive) {
+        summon.update(time, delta, this.groundY, enemies);
+      } else {
+        this.summons.splice(i, 1);
+      }
+    }
+
+    // 죽은 소환수 정리
+    this.player.minionGhouls = this.player.minionGhouls.filter((s: any) => s.isAlive);
+
+    // 포탈 충돌
+    this.checkPortalCollision();
+
+    // 죽은 몬스터 정리
+    this.monsters = this.monsters.filter(m => !m.isDead || m.active);
   }
 
-  private handleEnemyAttack(enemy: Enemy, time: number): void {
-    enemy.isAttacking = true;
-
-    if (time - enemy.lastAttackTime < enemy.attackSpeed) return;
-    enemy.lastAttackTime = time;
-
-    const pathKey = (enemy as any).pathKey as string;
-    const innerGateKey = (enemy as any).innerGateKey as string;
-    const target = enemy.targetPath[enemy.targetPath.length - 1];
-
-    // 수호석 공격 체크
-    if (Math.abs(target.x - MAP_CENTER_X) < 30 && Math.abs(target.y - MAP_CENTER_Y) < 30) {
-      this.guardianStone.takeDamage(enemy.damage);
-      this.soundManager.playGuardianHit();
-      return;
+  private handleInput(): void {
+    // 이동
+    if (this.cursors.left.isDown) {
+      this.player.moveLeft();
+    } else if (this.cursors.right.isDown) {
+      this.player.moveRight();
     }
 
-    // 외문 공격 체크
-    const outerGate = this.outerGates.get(pathKey);
-    if (outerGate && !outerGate.isDestroyed) {
-      this.soundManager.playGateHit();
-      const destroyed = outerGate.takeDamage(enemy.damage);
-      if (destroyed) {
-        const fullPath = ENEMY_PATHS[pathKey as keyof typeof ENEMY_PATHS];
-        const innerGate = this.innerGates.get(innerGateKey);
-
-        if (innerGate && !innerGate.isDestroyed) {
-          enemy.targetPath = fullPath.slice(0, GATE_INDICES.INNER_GATE + 1);
-        } else {
-          enemy.targetPath = [...fullPath];
-        }
-        // 성문 다음 지점부터 이동하도록 설정
-        enemy.currentPathIndex = GATE_INDICES.OUTER_GATE + 1;
-        enemy.isAttacking = false;
-      }
-      return;
+    // 점프 (Space 또는 Up)
+    if (Phaser.Input.Keyboard.JustDown(this.keys.space) || Phaser.Input.Keyboard.JustDown(this.keys.up)) {
+      this.player.jump();
     }
 
-    // 내문 공격 체크
-    const innerGate = this.innerGates.get(innerGateKey);
-    if (innerGate && !innerGate.isDestroyed) {
-      this.soundManager.playGateHit();
-      const destroyed = innerGate.takeDamage(enemy.damage);
-      if (destroyed) {
-        const fullPath = ENEMY_PATHS[pathKey as keyof typeof ENEMY_PATHS];
-        enemy.targetPath = [...fullPath];
-        // 성문 다음 지점부터 이동하도록 설정
-        enemy.currentPathIndex = GATE_INDICES.INNER_GATE + 1;
-        enemy.isAttacking = false;
-      }
-      return;
+    // 기본 공격 (Ctrl) - 파이어볼
+    if (Phaser.Input.Keyboard.JustDown(this.keys.ctrl)) {
+      this.player.castFireball();
+    }
+
+    // Q - 구울 소환
+    if (Phaser.Input.Keyboard.JustDown(this.keys.q)) {
+      this.player.summonGhoulMinion();
+    }
+
+    // W - 뼈가시
+    if (Phaser.Input.Keyboard.JustDown(this.keys.w)) {
+      this.player.castBoneSpike();
+    }
+
+    // E - 시체 폭탄
+    if (Phaser.Input.Keyboard.JustDown(this.keys.e)) {
+      this.player.castCorpseBomb();
+    }
+
+    // R - 거대 구울
+    if (Phaser.Input.Keyboard.JustDown(this.keys.r)) {
+      this.player.summonGiantGhoul();
+    }
+
+    // A - 암흑 보호막
+    if (Phaser.Input.Keyboard.JustDown(this.keys.a)) {
+      this.player.castDarkShield();
+    }
+
+    // S - 저주
+    if (Phaser.Input.Keyboard.JustDown(this.keys.s)) {
+      this.player.castCurse();
+    }
+
+    // D - 영혼 흡수
+    if (Phaser.Input.Keyboard.JustDown(this.keys.d)) {
+      this.player.castSoulDrain();
+    }
+
+    // F - 죽음의 파동
+    if (Phaser.Input.Keyboard.JustDown(this.keys.f)) {
+      this.player.castDeathWave();
     }
   }
 }

@@ -1,27 +1,38 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT, ECONOMY } from '../config/GameConfig';
-import { Unit } from '../entities/Unit';
-import { getSoundManager } from '../utils/SoundManager';
+import { GAME_WIDTH, GAME_HEIGHT, SKILL_TYPES } from '../config/GameConfig';
+import { Player } from '../entities/Player';
 
 export class UIScene extends Phaser.Scene {
-  private goldText!: Phaser.GameObjects.Text;
-  private waveText!: Phaser.GameObjects.Text;
-  private goldIcon!: Phaser.GameObjects.Graphics;
-
-  // Buttons
-  private unitButton!: Phaser.GameObjects.Container;
-  private cardButton!: Phaser.GameObjects.Container;
-
-  // Unit Info Panel
-  private unitInfoPanel!: Phaser.GameObjects.Container;
-  private selectedUnit: Unit | null = null;
-
-  // Game scene reference
   private gameScene!: Phaser.Scene;
+  private player!: Player;
 
-  // Current values
-  private currentGold: number = ECONOMY.startingGold;
-  private currentWave: number = 0;
+  // HP/EXP 바
+  private hpBarBg!: Phaser.GameObjects.Graphics;
+  private hpBar!: Phaser.GameObjects.Graphics;
+  private expBarBg!: Phaser.GameObjects.Graphics;
+  private expBar!: Phaser.GameObjects.Graphics;
+
+  // 텍스트
+  private hpText!: Phaser.GameObjects.Text;
+  private levelText!: Phaser.GameObjects.Text;
+  private goldText!: Phaser.GameObjects.Text;
+  private expText!: Phaser.GameObjects.Text;
+
+  // 스킬 슬롯
+  private skillSlots: Phaser.GameObjects.Container[] = [];
+  private skillCooldownOverlays: Map<string, Phaser.GameObjects.Graphics> = new Map();
+
+  // 콤보 표시
+  private comboContainer!: Phaser.GameObjects.Container;
+  private comboText!: Phaser.GameObjects.Text;
+  private comboCountText!: Phaser.GameObjects.Text;
+  private lastComboCount: number = 0;
+
+  // 조작 안내
+  private controlsText!: Phaser.GameObjects.Text;
+
+  // 맵 이름
+  private mapNameText!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'UIScene' });
@@ -29,595 +40,487 @@ export class UIScene extends Phaser.Scene {
 
   create(): void {
     this.gameScene = this.scene.get('GameScene');
+    this.player = (this.gameScene as any).player;
 
-    this.createTopPanel();
-    this.createBottomPanel();
-    this.createUnitInfoPanel();
+    this.createStatusBars();
+    this.createSkillBar();
+    this.createGoldDisplay();
+    this.createComboDisplay();
+    this.createControlsGuide();
     this.setupEventListeners();
   }
 
-  private createTopPanel(): void {
-    // Top panel background with gradient effect
-    const topPanel = this.add.graphics();
+  private createStatusBars(): void {
+    const barX = 20;
+    const barY = 20;
+    const barWidth = 250;
+    const barHeight = 22;
+    const gap = 8;
 
-    // 그라디언트 배경
-    topPanel.fillStyle(0x0a0a1a, 0.95);
-    topPanel.fillRoundedRect(10, 10, 320, 70, 15);
-    topPanel.fillStyle(0x1a1a3e, 0.8);
-    topPanel.fillRoundedRect(12, 12, 316, 40, 12);
+    // 상태바 패널 배경
+    const panelBg = this.add.graphics();
+    panelBg.fillStyle(0x000000, 0.7);
+    panelBg.fillRoundedRect(10, 10, 280, 100, 10);
+    panelBg.lineStyle(2, 0x00ffff, 0.4);
+    panelBg.strokeRoundedRect(10, 10, 280, 100, 10);
 
-    // 빛나는 테두리
-    topPanel.lineStyle(3, 0xFFD700, 0.6);
-    topPanel.strokeRoundedRect(10, 10, 320, 70, 15);
-    topPanel.lineStyle(1, 0xFFFFFF, 0.3);
-    topPanel.strokeRoundedRect(12, 12, 316, 66, 13);
+    // 레벨 표시
+    const levelBg = this.add.graphics();
+    levelBg.fillStyle(0x9944ff, 0.9);
+    levelBg.fillCircle(45, 45, 28);
+    levelBg.lineStyle(3, 0xcc66ff);
+    levelBg.strokeCircle(45, 45, 28);
+    levelBg.fillStyle(0x000000, 0.3);
+    levelBg.fillCircle(45, 45, 22);
 
-    // Gold icon - 더 화려하게
-    this.goldIcon = this.add.graphics();
-    this.goldIcon.setPosition(40, 45);
-
-    // 빛 효과
-    this.goldIcon.fillStyle(0xFFD700, 0.2);
-    this.goldIcon.fillCircle(0, 0, 25);
-
-    // 코인 그림자
-    this.goldIcon.fillStyle(0x8B6914, 1);
-    this.goldIcon.fillCircle(2, 2, 16);
-
-    // 메인 코인
-    this.goldIcon.fillStyle(0xFFD700);
-    this.goldIcon.fillCircle(0, 0, 16);
-
-    // 하이라이트
-    this.goldIcon.fillStyle(0xFFFFAA, 0.9);
-    this.goldIcon.fillCircle(-4, -4, 8);
-    this.goldIcon.fillStyle(0xFFFFFF, 0.6);
-    this.goldIcon.fillCircle(-5, -5, 4);
-
-    // 코인 테두리
-    this.goldIcon.lineStyle(2, 0xDAA520);
-    this.goldIcon.strokeCircle(0, 0, 16);
-
-    // G 표시
-    const gText = this.add.text(40, 45, 'G', {
-      fontSize: '14px',
-      color: '#8B6914',
-      fontStyle: 'bold',
-    }).setOrigin(0.5);
-
-    // Gold text
-    this.goldText = this.add.text(70, 32, `${this.currentGold}`, {
-      fontSize: '32px',
-      color: '#FFD700',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 4,
-    });
-
-    // 코인 반짝임 애니메이션
-    this.tweens.add({
-      targets: this.goldIcon,
-      scaleX: 1.05,
-      scaleY: 1.05,
-      duration: 1000,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
-
-    // Gold label
-    this.add.text(70, 58, 'GOLD', {
-      fontSize: '12px',
-      color: '#CCAA66',
-      fontStyle: 'bold',
-    });
-
-    // Wave panel - 더 화려하게
-    const wavePanel = this.add.graphics();
-
-    // 배경
-    wavePanel.fillStyle(0x1a0a0a, 0.95);
-    wavePanel.fillRoundedRect(GAME_WIDTH / 2 - 100, 10, 200, 55, 12);
-    wavePanel.fillStyle(0x2a1a1a, 0.8);
-    wavePanel.fillRoundedRect(GAME_WIDTH / 2 - 98, 12, 196, 35, 10);
-
-    // 빛나는 테두리
-    wavePanel.lineStyle(3, 0xFF4444, 0.7);
-    wavePanel.strokeRoundedRect(GAME_WIDTH / 2 - 100, 10, 200, 55, 12);
-    wavePanel.lineStyle(1, 0xFF6666, 0.4);
-    wavePanel.strokeRoundedRect(GAME_WIDTH / 2 - 98, 12, 196, 51, 10);
-
-    // Wave text
-    this.waveText = this.add.text(GAME_WIDTH / 2, 37, 'WAVE 0', {
-      fontSize: '28px',
-      color: '#FF4444',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5);
-
-    // Skull decorations - 더 멋지게
-    this.createSkullIcon(GAME_WIDTH / 2 - 80, 37);
-    this.createSkullIcon(GAME_WIDTH / 2 + 80, 37);
-
-    // 장식 라인
-    wavePanel.lineStyle(2, 0xFF4444, 0.3);
-    wavePanel.lineBetween(GAME_WIDTH / 2 - 60, 55, GAME_WIDTH / 2 + 60, 55);
-  }
-
-  private createSkullIcon(x: number, y: number): void {
-    const skull = this.add.graphics();
-    skull.setPosition(x, y);
-    skull.fillStyle(0xFFFFFF, 0.8);
-    skull.fillCircle(0, -2, 8);
-    skull.fillRoundedRect(-6, 0, 12, 8, 2);
-    skull.fillStyle(0x000000);
-    skull.fillCircle(-3, -3, 2);
-    skull.fillCircle(3, -3, 2);
-    skull.fillTriangle(-1, 1, 1, 1, 0, 4);
-  }
-
-  private createBottomPanel(): void {
-    // Bottom panel background - 화려한 디자인
-    const bottomPanel = this.add.graphics();
-
-    // 그림자
-    bottomPanel.fillStyle(0x000000, 0.5);
-    bottomPanel.fillRoundedRect(GAME_WIDTH / 2 - 198, GAME_HEIGHT - 88, 400, 85, 18);
-
-    // 메인 배경
-    bottomPanel.fillStyle(0x0a0a1a, 0.95);
-    bottomPanel.fillRoundedRect(GAME_WIDTH / 2 - 200, GAME_HEIGHT - 95, 400, 85, 18);
-
-    // 내부 그라디언트
-    bottomPanel.fillStyle(0x1a1a3e, 0.7);
-    bottomPanel.fillRoundedRect(GAME_WIDTH / 2 - 195, GAME_HEIGHT - 90, 390, 45, 12);
-
-    // 빛나는 테두리
-    bottomPanel.lineStyle(3, 0x4488FF, 0.6);
-    bottomPanel.strokeRoundedRect(GAME_WIDTH / 2 - 200, GAME_HEIGHT - 95, 400, 85, 18);
-    bottomPanel.lineStyle(1, 0x6699FF, 0.3);
-    bottomPanel.strokeRoundedRect(GAME_WIDTH / 2 - 198, GAME_HEIGHT - 93, 396, 81, 16);
-
-    // 장식 다이아몬드
-    const diamondPositions = [
-      { x: GAME_WIDTH / 2 - 185, y: GAME_HEIGHT - 80 },
-      { x: GAME_WIDTH / 2 + 185, y: GAME_HEIGHT - 80 },
-      { x: GAME_WIDTH / 2 - 185, y: GAME_HEIGHT - 25 },
-      { x: GAME_WIDTH / 2 + 185, y: GAME_HEIGHT - 25 },
-    ];
-
-    diamondPositions.forEach(pos => {
-      // 다이아몬드 모양
-      bottomPanel.fillStyle(0x4488FF, 0.8);
-      bottomPanel.fillTriangle(pos.x, pos.y - 6, pos.x - 5, pos.y, pos.x, pos.y + 6);
-      bottomPanel.fillTriangle(pos.x, pos.y - 6, pos.x + 5, pos.y, pos.x, pos.y + 6);
-      bottomPanel.fillStyle(0xAADDFF, 0.5);
-      bottomPanel.fillCircle(pos.x, pos.y, 3);
-    });
-
-    // 중앙 장식 라인
-    bottomPanel.lineStyle(2, 0x4488FF, 0.4);
-    bottomPanel.lineBetween(GAME_WIDTH / 2 - 5, GAME_HEIGHT - 85, GAME_WIDTH / 2 - 5, GAME_HEIGHT - 20);
-    bottomPanel.lineBetween(GAME_WIDTH / 2 + 5, GAME_HEIGHT - 85, GAME_WIDTH / 2 + 5, GAME_HEIGHT - 20);
-
-    // Unit summon button
-    this.unitButton = this.createButton(
-      GAME_WIDTH / 2 - 100,
-      GAME_HEIGHT - 52,
-      '유닛 소환',
-      `${ECONOMY.randomUnitCost}G`,
-      0x2a6a3e,
-      () => this.onUnitButtonClick()
-    );
-
-    // Card button
-    this.cardButton = this.createButton(
-      GAME_WIDTH / 2 + 100,
-      GAME_HEIGHT - 52,
-      '카드 뽑기',
-      `${ECONOMY.randomCardCost}G`,
-      0x6a2a6e,
-      () => this.onCardButtonClick()
-    );
-  }
-
-  private createButton(
-    x: number,
-    y: number,
-    label: string,
-    cost: string,
-    color: number,
-    onClick: () => void
-  ): Phaser.GameObjects.Container {
-    const container = this.add.container(x, y);
-
-    // 버튼 그림자
-    const shadow = this.add.graphics();
-    shadow.fillStyle(0x000000, 0.4);
-    shadow.fillRoundedRect(-73, -26, 150, 60, 12);
-    container.add(shadow);
-
-    // Button background - 그라디언트 효과
-    const bg = this.add.graphics();
-    bg.fillStyle(color - 0x101010);
-    bg.fillRoundedRect(-75, -30, 150, 60, 12);
-    bg.fillStyle(color);
-    bg.fillRoundedRect(-75, -30, 150, 55, 12);
-    bg.fillStyle(color + 0x151515);
-    bg.fillRoundedRect(-73, -28, 146, 25, 10);
-    container.add(bg);
-
-    // 빛나는 테두리
-    const border = this.add.graphics();
-    border.lineStyle(2, color + 0x404040);
-    border.strokeRoundedRect(-75, -30, 150, 60, 12);
-    border.lineStyle(1, 0xFFFFFF, 0.3);
-    border.strokeRoundedRect(-73, -28, 146, 56, 10);
-    container.add(border);
-
-    // 아이콘 (유닛 소환 = 검, 카드 = 카드 모양)
-    const icon = this.add.graphics();
-    icon.setPosition(-55, 0);
-    if (label.includes('유닛')) {
-      // 검 아이콘
-      icon.fillStyle(0xCCCCCC, 0.9);
-      icon.fillRect(-2, -12, 4, 18); // 검날
-      icon.fillStyle(0x8B4513);
-      icon.fillRect(-5, 6, 10, 4); // 손잡이 가드
-      icon.fillStyle(0x654321);
-      icon.fillRect(-2, 10, 4, 6); // 손잡이
-      icon.fillStyle(0xFFD700);
-      icon.fillCircle(0, -12, 3); // 검 끝 장식
-    } else {
-      // 카드 아이콘
-      icon.fillStyle(0xFFFFFF, 0.9);
-      icon.fillRoundedRect(-8, -12, 16, 24, 2);
-      icon.fillStyle(color + 0x303030);
-      icon.fillRoundedRect(-6, -10, 12, 20, 1);
-      icon.fillStyle(0xFFD700);
-      icon.fillCircle(0, 0, 4); // 카드 중앙 원
-      icon.lineStyle(1, 0xFFD700);
-      icon.strokeCircle(0, 0, 6);
-    }
-    container.add(icon);
-
-    // Label
-    const labelText = this.add.text(10, -10, label, {
-      fontSize: '16px',
+    this.levelText = this.add.text(45, 45, '1', {
+      fontSize: '22px',
       color: '#FFFFFF',
       fontStyle: 'bold',
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5);
-    container.add(labelText);
 
-    // Cost - 코인 아이콘 추가
-    const coinIcon = this.add.graphics();
-    coinIcon.setPosition(-10, 14);
-    coinIcon.fillStyle(0xFFD700);
-    coinIcon.fillCircle(0, 0, 8);
-    coinIcon.fillStyle(0xFFFFAA, 0.7);
-    coinIcon.fillCircle(-2, -2, 4);
-    coinIcon.lineStyle(1, 0xDAA520);
-    coinIcon.strokeCircle(0, 0, 8);
-    container.add(coinIcon);
+    // HP 바
+    const hpStartX = 80;
+    const hpY = 25;
 
-    const costText = this.add.text(15, 14, cost, {
+    this.hpBarBg = this.add.graphics();
+    this.hpBarBg.fillStyle(0x333333);
+    this.hpBarBg.fillRoundedRect(hpStartX, hpY, barWidth - 30, barHeight, 5);
+    this.hpBarBg.lineStyle(2, 0x555555);
+    this.hpBarBg.strokeRoundedRect(hpStartX, hpY, barWidth - 30, barHeight, 5);
+
+    this.hpBar = this.add.graphics();
+
+    // HP 아이콘
+    const hpIcon = this.add.graphics();
+    hpIcon.fillStyle(0xFF4444);
+    hpIcon.fillCircle(hpStartX - 15, hpY + barHeight / 2, 8);
+    hpIcon.fillStyle(0xFF8888, 0.6);
+    hpIcon.fillCircle(hpStartX - 17, hpY + barHeight / 2 - 2, 4);
+
+    this.hpText = this.add.text(hpStartX + (barWidth - 30) / 2, hpY + barHeight / 2, '', {
       fontSize: '14px',
-      color: '#FFD700',
+      color: '#FFFFFF',
       fontStyle: 'bold',
       stroke: '#000000',
       strokeThickness: 2,
-    }).setOrigin(0, 0.5);
-    container.add(costText);
+    }).setOrigin(0.5);
 
-    // Make interactive
-    const hitArea = this.add.rectangle(0, 0, 150, 60, 0x000000, 0);
-    hitArea.setInteractive({ useHandCursor: true });
-    container.add(hitArea);
+    // EXP 바
+    const expY = hpY + barHeight + gap;
 
-    // Hover 시 빛나는 효과
-    const glowEffect = this.add.graphics();
-    glowEffect.setVisible(false);
-    container.add(glowEffect);
+    this.expBarBg = this.add.graphics();
+    this.expBarBg.fillStyle(0x333333);
+    this.expBarBg.fillRoundedRect(hpStartX, expY, barWidth - 30, 14, 3);
+    this.expBarBg.lineStyle(1, 0x555555);
+    this.expBarBg.strokeRoundedRect(hpStartX, expY, barWidth - 30, 14, 3);
 
-    hitArea.on('pointerover', () => {
-      this.tweens.add({
-        targets: container,
-        scaleX: 1.08,
-        scaleY: 1.08,
-        duration: 100,
-        ease: 'Back.easeOut',
-      });
+    this.expBar = this.add.graphics();
 
-      bg.clear();
-      bg.fillStyle(color);
-      bg.fillRoundedRect(-75, -30, 150, 60, 12);
-      bg.fillStyle(color + 0x252525);
-      bg.fillRoundedRect(-73, -28, 146, 55, 10);
-      bg.fillStyle(color + 0x353535);
-      bg.fillRoundedRect(-71, -26, 142, 25, 8);
+    this.expText = this.add.text(hpStartX + (barWidth - 30) / 2, expY + 7, '', {
+      fontSize: '11px',
+      color: '#FFFFFF',
+      stroke: '#000000',
+      strokeThickness: 1,
+    }).setOrigin(0.5);
 
-      border.clear();
-      border.lineStyle(3, 0xFFFFFF, 0.8);
-      border.strokeRoundedRect(-75, -30, 150, 60, 12);
+    // 초기 업데이트
+    this.updateHpBar();
+    this.updateExpBar();
+  }
 
-      glowEffect.clear();
-      glowEffect.setVisible(true);
-      glowEffect.fillStyle(0xFFFFFF, 0.1);
-      glowEffect.fillRoundedRect(-80, -35, 160, 70, 15);
+  private createSkillBar(): void {
+    const skillBarY = GAME_HEIGHT - 70;
+    const startX = GAME_WIDTH / 2 - 270;
+    const slotSize = 50;
+    const gap = 6;
+
+    // 스킬바 배경
+    const skillBarBg = this.add.graphics();
+    skillBarBg.fillStyle(0x000000, 0.8);
+    skillBarBg.fillRoundedRect(startX - 15, skillBarY - 15, 570, 80, 10);
+    skillBarBg.lineStyle(2, 0x9944ff, 0.6);
+    skillBarBg.strokeRoundedRect(startX - 15, skillBarY - 15, 570, 80, 10);
+
+    const skills = [
+      { key: 'Ctrl', name: '파이어볼', skillKey: 'FIREBALL', color: 0xff6600 },
+      { key: 'Q', name: '구울 소환', skillKey: 'GHOUL_SUMMON', color: 0x664488 },
+      { key: 'W', name: '뼈가시', skillKey: 'BONE_SPIKE', color: 0xffffcc },
+      { key: 'E', name: '시체폭탄', skillKey: 'CORPSE_BOMB', color: 0x88ff44 },
+      { key: 'R', name: '거대구울', skillKey: 'GIANT_GHOUL', color: 0x663399 },
+      { key: 'A', name: '보호막', skillKey: 'DARK_SHIELD', color: 0x4444aa },
+      { key: 'S', name: '저주', skillKey: 'CURSE', color: 0x660066 },
+      { key: 'D', name: '영혼흡수', skillKey: 'SOUL_DRAIN', color: 0x00ffcc },
+      { key: 'F', name: '죽음파동', skillKey: 'DEATH_WAVE', color: 0x220022 },
+    ];
+
+    skills.forEach((skillData, index) => {
+      const x = startX + index * (slotSize + gap);
+      const slot = this.createSkillSlot(x, skillBarY + 20, slotSize, skillData);
+      this.skillSlots.push(slot);
     });
+  }
 
-    hitArea.on('pointerout', () => {
-      this.tweens.add({
-        targets: container,
-        scaleX: 1,
-        scaleY: 1,
-        duration: 100,
-      });
+  private createSkillSlot(
+    x: number,
+    y: number,
+    size: number,
+    skillData: { key: string; name: string; skillKey: string; color: number }
+  ): Phaser.GameObjects.Container {
+    const container = this.add.container(x, y);
 
-      bg.clear();
-      bg.fillStyle(color - 0x101010);
-      bg.fillRoundedRect(-75, -30, 150, 60, 12);
-      bg.fillStyle(color);
-      bg.fillRoundedRect(-75, -30, 150, 55, 12);
-      bg.fillStyle(color + 0x151515);
-      bg.fillRoundedRect(-73, -28, 146, 25, 10);
+    // 슬롯 배경
+    const bg = this.add.graphics();
+    bg.fillStyle(0x1a1a2e, 0.9);
+    bg.fillRoundedRect(-size / 2, -size / 2, size, size, 6);
+    bg.lineStyle(2, skillData.color, 0.7);
+    bg.strokeRoundedRect(-size / 2, -size / 2, size, size, 6);
+    container.add(bg);
 
-      border.clear();
-      border.lineStyle(2, color + 0x404040);
-      border.strokeRoundedRect(-75, -30, 150, 60, 12);
-      border.lineStyle(1, 0xFFFFFF, 0.3);
-      border.strokeRoundedRect(-73, -28, 146, 56, 10);
+    // 스킬 아이콘 (색상 + 심볼)
+    const icon = this.add.graphics();
+    icon.fillStyle(skillData.color, 0.8);
+    icon.fillCircle(0, -3, 14);
+    icon.lineStyle(2, 0xFFFFFF, 0.4);
+    icon.strokeCircle(0, -3, 14);
 
-      glowEffect.setVisible(false);
-    });
+    // 스킬별 심볼
+    this.drawSkillSymbol(icon, skillData.skillKey);
+    container.add(icon);
 
-    hitArea.on('pointerdown', () => {
-      this.tweens.add({
-        targets: container,
-        scaleX: 0.92,
-        scaleY: 0.92,
-        duration: 50,
-        yoyo: true,
-        onComplete: () => onClick(),
-      });
+    // 쿨다운 오버레이
+    const cooldownOverlay = this.add.graphics();
+    cooldownOverlay.setVisible(false);
+    container.add(cooldownOverlay);
+    this.skillCooldownOverlays.set(skillData.skillKey, cooldownOverlay);
 
-      // 클릭 파티클
-      for (let i = 0; i < 8; i++) {
-        const particle = this.add.graphics();
-        particle.setPosition(x, y);
-        particle.fillStyle(0xFFFFFF, 0.8);
-        particle.fillCircle(0, 0, 3);
+    // 쿨다운 텍스트
+    const cooldownText = this.add.text(0, -3, '', {
+      fontSize: '14px',
+      color: '#FFFFFF',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5);
+    container.add(cooldownText);
+    (container as any).cooldownText = cooldownText;
 
-        const angle = (i / 8) * Math.PI * 2;
-        this.tweens.add({
-          targets: particle,
-          x: x + Math.cos(angle) * 40,
-          y: y + Math.sin(angle) * 40,
-          alpha: 0,
-          duration: 300,
-          onComplete: () => particle.destroy(),
-        });
-      }
-    });
+    // 키 표시
+    const keyBg = this.add.graphics();
+    keyBg.fillStyle(0x000000, 0.9);
+    keyBg.fillRoundedRect(-12, 12, 24, 16, 3);
+    container.add(keyBg);
 
-    // 부드러운 호버 애니메이션
-    this.tweens.add({
-      targets: container,
-      y: y - 2,
-      duration: 1500,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
+    const keyText = this.add.text(0, 20, skillData.key, {
+      fontSize: '10px',
+      color: '#00FFFF',
+      fontStyle: 'bold',
+    }).setOrigin(0.5);
+    container.add(keyText);
+
+    // 스킬 데이터 저장
+    (container as any).skillKey = skillData.skillKey;
+    (container as any).skillColor = skillData.color;
+    (container as any).bg = bg;
 
     return container;
   }
 
-  private createUnitInfoPanel(): void {
-    // Create container for unit info panel (initially hidden)
-    this.unitInfoPanel = this.add.container(GAME_WIDTH - 110, 200);
-    this.unitInfoPanel.setVisible(false);
-    this.unitInfoPanel.setDepth(100);
+  private drawSkillSymbol(graphics: Phaser.GameObjects.Graphics, skillKey: string): void {
+    graphics.lineStyle(2, 0xffffff, 0.8);
 
-    // Panel background
-    const panelBg = this.add.graphics();
-    panelBg.fillStyle(0x1a1a2e, 0.95);
-    panelBg.fillRoundedRect(-100, -20, 200, 280, 12);
-    panelBg.lineStyle(3, 0x4a4a6e);
-    panelBg.strokeRoundedRect(-100, -20, 200, 280, 12);
-    this.unitInfoPanel.add(panelBg);
+    switch (skillKey) {
+      case 'FIREBALL':
+        // 불꽃 모양
+        graphics.beginPath();
+        graphics.arc(0, -3, 6, 0, Math.PI * 2, false);
+        graphics.stroke();
+        break;
+      case 'GHOUL_SUMMON':
+        // 구울 모양
+        graphics.fillStyle(0xffffff, 0.8);
+        graphics.fillCircle(0, -3, 6);
+        // 뿔
+        graphics.beginPath();
+        graphics.moveTo(-4, -6);
+        graphics.lineTo(-6, -12);
+        graphics.moveTo(4, -6);
+        graphics.lineTo(6, -12);
+        graphics.stroke();
+        break;
+      case 'BONE_SPIKE':
+        // 가시 모양
+        graphics.beginPath();
+        graphics.moveTo(-5, 5);
+        graphics.lineTo(0, -8);
+        graphics.lineTo(5, 5);
+        graphics.stroke();
+        break;
+      case 'CORPSE_BOMB':
+        // 폭발 모양
+        graphics.beginPath();
+        graphics.arc(0, -3, 8, 0, Math.PI * 2, false);
+        graphics.stroke();
+        graphics.fillStyle(0xffffff, 0.5);
+        graphics.fillCircle(0, -3, 4);
+        break;
+      case 'GIANT_GHOUL':
+        // 뿔 달린 모양
+        graphics.beginPath();
+        graphics.moveTo(-6, 0);
+        graphics.lineTo(-4, -8);
+        graphics.moveTo(6, 0);
+        graphics.lineTo(4, -8);
+        graphics.stroke();
+        break;
+      case 'DARK_SHIELD':
+        // 방패 모양
+        graphics.beginPath();
+        graphics.arc(0, -3, 7, Math.PI * 0.2, Math.PI * 0.8, false);
+        graphics.lineTo(0, 5);
+        graphics.closePath();
+        graphics.stroke();
+        break;
+      case 'CURSE':
+        // 저주 문양
+        graphics.beginPath();
+        graphics.moveTo(-5, -5);
+        graphics.lineTo(5, 3);
+        graphics.moveTo(5, -5);
+        graphics.lineTo(-5, 3);
+        graphics.stroke();
+        break;
+      case 'SOUL_DRAIN':
+        // 소용돌이
+        graphics.beginPath();
+        graphics.arc(0, -3, 6, 0, Math.PI * 1.5, false);
+        graphics.stroke();
+        break;
+      case 'DEATH_WAVE':
+        // 파동 모양
+        graphics.beginPath();
+        graphics.arc(0, -3, 4, 0, Math.PI * 2, false);
+        graphics.stroke();
+        graphics.beginPath();
+        graphics.arc(0, -3, 8, 0, Math.PI * 2, false);
+        graphics.stroke();
+        break;
+    }
+  }
 
-    // Decorative top border
-    const topBorder = this.add.graphics();
-    topBorder.fillStyle(0xFFD700, 0.8);
-    topBorder.fillRoundedRect(-90, -15, 180, 5, 2);
-    this.unitInfoPanel.add(topBorder);
+  private createGoldDisplay(): void {
+    // 골드 패널
+    const goldPanel = this.add.graphics();
+    goldPanel.fillStyle(0x000000, 0.7);
+    goldPanel.fillRoundedRect(GAME_WIDTH - 150, 20, 130, 40, 8);
+    goldPanel.lineStyle(2, 0xFFD700, 0.5);
+    goldPanel.strokeRoundedRect(GAME_WIDTH - 150, 20, 130, 40, 8);
 
-    // Close button (X)
-    const closeBtn = this.add.text(85, -10, '✕', {
-      fontSize: '20px',
-      color: '#FF6666',
+    // 골드 아이콘
+    const goldIcon = this.add.graphics();
+    goldIcon.setPosition(GAME_WIDTH - 130, 40);
+    goldIcon.fillStyle(0xFFD700);
+    goldIcon.fillCircle(0, 0, 12);
+    goldIcon.fillStyle(0xFFFF88, 0.6);
+    goldIcon.fillCircle(-3, -3, 5);
+    goldIcon.lineStyle(2, 0xDAA520);
+    goldIcon.strokeCircle(0, 0, 12);
+
+    // G 표시
+    this.add.text(GAME_WIDTH - 130, 40, 'G', {
+      fontSize: '10px',
+      color: '#8B6914',
       fontStyle: 'bold',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    }).setOrigin(0.5);
 
-    closeBtn.on('pointerover', () => closeBtn.setColor('#FFFFFF'));
-    closeBtn.on('pointerout', () => closeBtn.setColor('#FF6666'));
-    closeBtn.on('pointerdown', () => this.hideUnitInfoPanel());
-
-    this.unitInfoPanel.add(closeBtn);
-
-    // Title
-    const titleBg = this.add.graphics();
-    titleBg.fillStyle(0x2a2a4e, 0.8);
-    titleBg.fillRoundedRect(-85, 0, 170, 30, 5);
-    this.unitInfoPanel.add(titleBg);
-
-    const title = this.add.text(0, 15, '유닛 정보', {
-      fontSize: '16px',
+    // 골드 텍스트
+    this.goldText = this.add.text(GAME_WIDTH - 50, 40, '0', {
+      fontSize: '20px',
       color: '#FFD700',
       fontStyle: 'bold',
-    }).setOrigin(0.5);
-    this.unitInfoPanel.add(title);
-  }
-
-  private showUnitInfoPanel(unit: Unit): void {
-    this.selectedUnit = unit;
-    this.unitInfoPanel.setVisible(true);
-
-    // Clear previous content (keep first 4 elements: bg, border, close btn, title bg, title)
-    while (this.unitInfoPanel.list.length > 5) {
-      const child = this.unitInfoPanel.list[5];
-      if (child instanceof Phaser.GameObjects.GameObject) {
-        child.destroy();
-      }
-      this.unitInfoPanel.remove(child);
-    }
-
-    // Unit portrait background
-    const portraitBg = this.add.graphics();
-    portraitBg.fillStyle(0x2a2a4e, 0.9);
-    portraitBg.fillRoundedRect(-40, 40, 80, 80, 8);
-    portraitBg.lineStyle(2, unit.getGradeColorHex());
-    portraitBg.strokeRoundedRect(-40, 40, 80, 80, 8);
-    this.unitInfoPanel.add(portraitBg);
-
-    // Unit name
-    const nameText = this.add.text(0, 135, unit.unitName, {
-      fontSize: '18px',
-      color: '#FFFFFF',
-      fontStyle: 'bold',
       stroke: '#000000',
-      strokeThickness: 2,
-    }).setOrigin(0.5);
-    this.unitInfoPanel.add(nameText);
+      strokeThickness: 3,
+    }).setOrigin(1, 0.5);
 
-    // Grade badge
-    const gradeBadge = this.add.graphics();
-    const gradeColor = unit.getGradeColorHex();
-    gradeBadge.fillStyle(gradeColor);
-    gradeBadge.fillRoundedRect(-20, 155, 40, 25, 5);
-    gradeBadge.lineStyle(1, 0xFFFFFF, 0.5);
-    gradeBadge.strokeRoundedRect(-20, 155, 40, 25, 5);
-    this.unitInfoPanel.add(gradeBadge);
-
-    const gradeText = this.add.text(0, 167, unit.grade, {
-      fontSize: '16px',
-      color: '#FFFFFF',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 2,
-    }).setOrigin(0.5);
-    this.unitInfoPanel.add(gradeText);
-
-    // Stats
-    const statsStartY = 195;
-    const statsData = [
-      { label: 'HP', value: `${unit.currentHealth}/${unit.maxHealth}`, color: '#00FF00' },
-      { label: '공격력', value: `${unit.damage}`, color: '#FF6666' },
-      { label: '공속', value: `${(1000 / unit.attackSpeed).toFixed(1)}/초`, color: '#66AAFF' },
-      { label: '사거리', value: `${unit.range}`, color: '#FFAA00' },
-    ];
-
-    statsData.forEach((stat, index) => {
-      const y = statsStartY + index * 22;
-
-      // Stat row background
-      const rowBg = this.add.graphics();
-      rowBg.fillStyle(index % 2 === 0 ? 0x2a2a4e : 0x252540, 0.6);
-      rowBg.fillRect(-85, y - 8, 170, 20);
-      this.unitInfoPanel.add(rowBg);
-
-      // Label
-      const label = this.add.text(-80, y, stat.label, {
-        fontSize: '13px',
-        color: '#AAAAAA',
-      });
-      this.unitInfoPanel.add(label);
-
-      // Value
-      const value = this.add.text(80, y, stat.value, {
-        fontSize: '13px',
-        color: stat.color,
-        fontStyle: 'bold',
-      }).setOrigin(1, 0);
-      this.unitInfoPanel.add(value);
-    });
-
-    // Animate panel appearance
-    this.unitInfoPanel.setAlpha(0);
-    this.unitInfoPanel.setScale(0.8);
+    // 골드 아이콘 애니메이션
     this.tweens.add({
-      targets: this.unitInfoPanel,
-      alpha: 1,
-      scaleX: 1,
-      scaleY: 1,
-      duration: 150,
-      ease: 'Back.easeOut',
+      targets: goldIcon,
+      scaleX: 1.1,
+      scaleY: 1.1,
+      duration: 1000,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
     });
   }
 
-  private hideUnitInfoPanel(): void {
-    const soundManager = getSoundManager();
-    soundManager?.playButtonClick();
+  private createComboDisplay(): void {
+    this.comboContainer = this.add.container(GAME_WIDTH / 2, 150);
+    this.comboContainer.setVisible(false);
 
-    // Deselect current unit
-    if (this.selectedUnit && this.selectedUnit.active) {
-      this.selectedUnit.deselect();
-    }
-    this.selectedUnit = null;
+    // 콤보 배경
+    const comboBg = this.add.graphics();
+    comboBg.fillStyle(0x000000, 0.7);
+    comboBg.fillRoundedRect(-80, -30, 160, 60, 10);
+    comboBg.lineStyle(2, 0xff6600, 0.6);
+    comboBg.strokeRoundedRect(-80, -30, 160, 60, 10);
+    this.comboContainer.add(comboBg);
 
-    // Animate panel disappearance
-    this.tweens.add({
-      targets: this.unitInfoPanel,
-      alpha: 0,
-      scaleX: 0.8,
-      scaleY: 0.8,
-      duration: 100,
-      onComplete: () => {
-        this.unitInfoPanel.setVisible(false);
-      },
-    });
+    // 콤보 숫자
+    this.comboCountText = this.add.text(0, -5, '0', {
+      fontSize: '36px',
+      color: '#FF6600',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 5,
+    }).setOrigin(0.5);
+    this.comboContainer.add(this.comboCountText);
+
+    // COMBO 텍스트
+    this.comboText = this.add.text(0, 18, 'COMBO', {
+      fontSize: '14px',
+      color: '#FFAA00',
+      fontStyle: 'bold',
+    }).setOrigin(0.5);
+    this.comboContainer.add(this.comboText);
+  }
+
+  private createControlsGuide(): void {
+    // 조작 안내 (우측 하단)
+    const guidePanel = this.add.graphics();
+    guidePanel.fillStyle(0x000000, 0.6);
+    guidePanel.fillRoundedRect(GAME_WIDTH - 200, GAME_HEIGHT - 120, 190, 110, 8);
+    guidePanel.lineStyle(1, 0x00ffff, 0.3);
+    guidePanel.strokeRoundedRect(GAME_WIDTH - 200, GAME_HEIGHT - 120, 190, 110, 8);
+
+    this.controlsText = this.add.text(GAME_WIDTH - 105, GAME_HEIGHT - 65,
+      '← → : 이동\nSpace/↑ : 점프\nCtrl : 파이어볼\nQ W E R : 스킬\nA S D F : 보조 스킬', {
+        fontSize: '11px',
+        color: '#88FFFF',
+        align: 'center',
+        lineSpacing: 4,
+      }).setOrigin(0.5);
   }
 
   private setupEventListeners(): void {
-    // Listen to game scene events
+    // 레벨업 이벤트
+    this.gameScene.events.on('levelUp', (level: number) => {
+      this.showLevelUpEffect(level);
+    });
+
+    // 골드 변경 이벤트
     this.gameScene.events.on('goldChanged', (gold: number) => {
-      this.updateGold(gold);
-    });
-
-    this.gameScene.events.on('waveStarted', (wave: number) => {
-      this.updateWave(wave);
-    });
-
-    // Listen for unit selection
-    this.gameScene.events.on('unitSelected', (unit: Unit | null) => {
-      if (unit) {
-        this.showUnitInfoPanel(unit);
-      } else {
-        this.hideUnitInfoPanel();
-      }
-    });
-
-    // Listen for unit death to close panel if selected unit dies
-    this.gameScene.events.on('unitDied', (unit: Unit) => {
-      if (this.selectedUnit === unit) {
-        this.hideUnitInfoPanel();
-      }
+      this.updateGoldDisplay(gold);
     });
   }
 
-  private updateGold(gold: number): void {
-    const oldGold = this.currentGold;
-    this.currentGold = gold;
+  private updateHpBar(): void {
+    if (!this.player) return;
 
-    // Animate gold change
+    const barX = 80;
+    const barY = 30;
+    const barWidth = 220;
+    const barHeight = 22;
+
+    const hpPercent = this.player.currentHealth / this.player.maxHealth;
+
+    this.hpBar.clear();
+
+    // 체력에 따른 색상
+    let color = 0x44FF44;
+    if (hpPercent < 0.3) color = 0xFF4444;
+    else if (hpPercent < 0.6) color = 0xFFAA00;
+
+    // HP 바 채우기
+    this.hpBar.fillStyle(color);
+    this.hpBar.fillRoundedRect(barX + 2, barY + 2, (barWidth - 4) * hpPercent, barHeight - 4, 3);
+
+    // 하이라이트
+    this.hpBar.fillStyle(0xFFFFFF, 0.3);
+    this.hpBar.fillRoundedRect(barX + 2, barY + 2, (barWidth - 4) * hpPercent, (barHeight - 4) / 2, { tl: 3, tr: 3, bl: 0, br: 0 });
+
+    // 텍스트 업데이트
+    if (this.hpText) {
+      this.hpText.setText(`${Math.floor(this.player.currentHealth)} / ${this.player.maxHealth}`);
+    }
+  }
+
+  private updateExpBar(): void {
+    if (!this.player) return;
+
+    const barX = 80;
+    const barY = 90;
+    const barWidth = 220;
+
+    const expPercent = this.player.currentExp / this.player.expToNextLevel;
+
+    this.expBar.clear();
+    this.expBar.fillStyle(0xFFFF44);
+    this.expBar.fillRoundedRect(barX + 1, barY + 1, (barWidth - 2) * expPercent, 12, 2);
+
+    if (this.expText) {
+      this.expText.setText(`${this.player.currentExp} / ${this.player.expToNextLevel}`);
+    }
+  }
+
+  private updateSkillCooldowns(): void {
+    if (!this.player) return;
+
+    for (const slot of this.skillSlots) {
+      const skillKey = (slot as any).skillKey;
+      const cooldownPercent = this.player.getSkillCooldownPercent(skillKey);
+      const overlay = this.skillCooldownOverlays.get(skillKey);
+      const cooldownText = (slot as any).cooldownText;
+      const bg = (slot as any).bg;
+
+      if (overlay) {
+        if (cooldownPercent > 0) {
+          overlay.setVisible(true);
+          overlay.clear();
+          overlay.fillStyle(0x000000, 0.7);
+
+          // 원형 쿨다운 표시
+          const size = 50;
+          const startAngle = -Math.PI / 2;
+          const endAngle = startAngle + (Math.PI * 2 * cooldownPercent);
+
+          overlay.beginPath();
+          overlay.moveTo(0, -3);
+          overlay.arc(0, -3, 16, startAngle, endAngle, false);
+          overlay.closePath();
+          overlay.fillPath();
+
+          // 쿨다운 시간 표시
+          const skill = (SKILL_TYPES as any)[skillKey];
+          const remainingTime = (skill.cooldown * cooldownPercent) / 1000;
+          if (remainingTime >= 1) {
+            cooldownText.setText(`${Math.ceil(remainingTime)}`);
+            cooldownText.setVisible(true);
+          } else {
+            cooldownText.setVisible(false);
+          }
+
+          // 슬롯 어둡게
+          bg.setAlpha(0.5);
+        } else {
+          overlay.setVisible(false);
+          cooldownText.setVisible(false);
+          bg.setAlpha(1);
+        }
+      }
+    }
+  }
+
+  private updateGoldDisplay(gold: number): void {
+    const oldGold = parseInt(this.goldText.text) || 0;
+
+    // 숫자 애니메이션
     this.tweens.add({
       targets: this.goldText,
-      scaleX: 1.2,
-      scaleY: 1.2,
+      scaleX: 1.3,
+      scaleY: 1.3,
       duration: 100,
       yoyo: true,
       onComplete: () => {
@@ -625,289 +528,167 @@ export class UIScene extends Phaser.Scene {
       },
     });
 
-    // Gold particle effect
+    // 골드 획득 이펙트
     if (gold > oldGold) {
-      this.createGoldParticle();
+      const diff = gold - oldGold;
+      const effect = this.add.text(GAME_WIDTH - 80, 70, `+${diff}`, {
+        fontSize: '18px',
+        color: '#FFD700',
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 2,
+      }).setOrigin(0.5);
+
+      this.tweens.add({
+        targets: effect,
+        y: effect.y - 30,
+        alpha: 0,
+        duration: 800,
+        onComplete: () => effect.destroy(),
+      });
     }
   }
 
-  private createGoldParticle(): void {
-    const particle = this.add.graphics();
-    particle.fillStyle(0xFFD700);
-    particle.fillCircle(0, 0, 5);
-    particle.setPosition(90, 40);
+  private updateComboDisplay(): void {
+    if (!this.player) return;
 
-    this.tweens.add({
-      targets: particle,
-      y: particle.y - 20,
-      alpha: 0,
-      duration: 500,
-      onComplete: () => particle.destroy(),
-    });
-  }
+    const combo = this.player.getComboCount();
 
-  private updateWave(wave: number): void {
-    this.currentWave = wave;
-    this.waveText.setText(`WAVE ${wave}`);
+    if (combo >= 3) {
+      this.comboContainer.setVisible(true);
+      this.comboCountText.setText(`${combo}`);
 
-    // Wave start animation
-    this.tweens.add({
-      targets: this.waveText,
-      scaleX: 1.3,
-      scaleY: 1.3,
-      duration: 200,
-      yoyo: true,
-    });
+      // 콤보에 따른 색상
+      let color = '#FF6600';
+      let label = 'COMBO';
+      let fontSize = 36;
 
-    // Flash effect
-    this.cameras.main.flash(200, 100, 0, 0, false);
+      if (combo >= 30) {
+        color = '#FF00FF';
+        label = 'LEGENDARY!';
+        fontSize = 44;
+      } else if (combo >= 20) {
+        color = '#00FFFF';
+        label = 'AMAZING!';
+        fontSize = 42;
+      } else if (combo >= 10) {
+        color = '#FFFF00';
+        label = 'GREAT!';
+        fontSize = 40;
+      } else if (combo >= 5) {
+        color = '#FF8800';
+        label = 'NICE!';
+        fontSize = 38;
+      }
 
-    // Show wave announcement
-    this.showWaveAnnouncement(wave);
-  }
+      this.comboCountText.setStyle({
+        fontSize: `${fontSize}px`,
+        color: color,
+        fontStyle: 'bold',
+        stroke: '#000000',
+        strokeThickness: 5,
+      });
+      this.comboText.setText(label);
 
-  private showWaveAnnouncement(wave: number): void {
-    // 화면 어둡게
-    const overlay = this.add.graphics();
-    overlay.fillStyle(0x000000, 0);
-    overlay.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-    overlay.setDepth(1000);
-
-    this.tweens.add({
-      targets: overlay,
-      alpha: 0.4,
-      duration: 200,
-      yoyo: true,
-      hold: 800,
-      onComplete: () => overlay.destroy(),
-    });
-
-    // 배경 효과
-    const bgEffect = this.add.graphics();
-    bgEffect.setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2);
-    bgEffect.setDepth(1001);
-    bgEffect.fillStyle(0xFF0000, 0.3);
-    bgEffect.fillCircle(0, 0, 50);
-
-    this.tweens.add({
-      targets: bgEffect,
-      scaleX: 15,
-      scaleY: 15,
-      alpha: 0,
-      duration: 600,
-      onComplete: () => bgEffect.destroy(),
-    });
-
-    // WAVE 텍스트 (위)
-    const waveLabel = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50, 'W A V E', {
-      fontSize: '32px',
-      color: '#FFAAAA',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setAlpha(0).setDepth(1002);
-
-    // 숫자 (아래)
-    const waveNumber = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20, `${wave}`, {
-      fontSize: '96px',
-      color: '#FF0000',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 10,
-    }).setOrigin(0.5).setAlpha(0).setScale(0.5).setDepth(1002);
-
-    // 장식 라인
-    const lineLeft = this.add.graphics();
-    lineLeft.setPosition(GAME_WIDTH / 2 - 150, GAME_HEIGHT / 2);
-    lineLeft.setDepth(1001);
-    lineLeft.lineStyle(4, 0xFF4444, 0);
-    lineLeft.lineBetween(0, 0, -100, 0);
-
-    const lineRight = this.add.graphics();
-    lineRight.setPosition(GAME_WIDTH / 2 + 150, GAME_HEIGHT / 2);
-    lineRight.setDepth(1001);
-    lineRight.lineStyle(4, 0xFF4444, 0);
-    lineRight.lineBetween(0, 0, 100, 0);
-
-    // 애니메이션 시퀀스
-    this.tweens.add({
-      targets: waveLabel,
-      alpha: 1,
-      y: GAME_HEIGHT / 2 - 60,
-      duration: 300,
-      ease: 'Back.easeOut',
-    });
-
-    this.tweens.add({
-      targets: waveNumber,
-      alpha: 1,
-      scaleX: 1.2,
-      scaleY: 1.2,
-      duration: 400,
-      delay: 100,
-      ease: 'Back.easeOut',
-      onComplete: () => {
-        // 숫자 펄스
+      // 콤보 증가 애니메이션
+      if (combo > this.lastComboCount && combo > 3) {
         this.tweens.add({
-          targets: waveNumber,
-          scaleX: 1.3,
-          scaleY: 1.3,
+          targets: this.comboContainer,
+          scaleX: 1.2,
+          scaleY: 1.2,
           duration: 100,
           yoyo: true,
+        });
+      }
+    } else {
+      if (this.comboContainer.visible && this.lastComboCount >= 3) {
+        // 콤보 종료 페이드아웃
+        this.tweens.add({
+          targets: this.comboContainer,
+          alpha: 0,
+          duration: 300,
+          onComplete: () => {
+            this.comboContainer.setVisible(false);
+            this.comboContainer.setAlpha(1);
+          },
+        });
+      }
+    }
+
+    this.lastComboCount = combo;
+  }
+
+  private showLevelUpEffect(level: number): void {
+    this.levelText.setText(`${level}`);
+
+    // 레벨 표시 애니메이션
+    this.tweens.add({
+      targets: this.levelText,
+      scaleX: 1.5,
+      scaleY: 1.5,
+      duration: 200,
+      yoyo: true,
+    });
+
+    // 레벨업 알림
+    const levelUpText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 100, `LEVEL ${level}!`, {
+      fontSize: '48px',
+      color: '#FFD700',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 6,
+    }).setOrigin(0.5).setAlpha(0);
+
+    this.tweens.add({
+      targets: levelUpText,
+      alpha: 1,
+      y: levelUpText.y - 30,
+      duration: 400,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(800, () => {
+          this.tweens.add({
+            targets: levelUpText,
+            alpha: 0,
+            y: levelUpText.y - 20,
+            duration: 300,
+            onComplete: () => levelUpText.destroy(),
+          });
         });
       },
     });
 
-    // 라인 애니메이션
-    this.tweens.add({
-      targets: [lineLeft, lineRight],
-      alpha: 1,
-      scaleX: 1.5,
-      duration: 300,
-      delay: 200,
-    });
-
     // 파티클 효과
     for (let i = 0; i < 20; i++) {
-      this.time.delayedCall(i * 30, () => {
-        const particle = this.add.graphics();
-        particle.setPosition(
-          GAME_WIDTH / 2 + Phaser.Math.Between(-200, 200),
-          GAME_HEIGHT / 2 + Phaser.Math.Between(-100, 100)
-        );
-        particle.setDepth(1001);
-        particle.fillStyle(Phaser.Math.RND.pick([0xFF0000, 0xFF4444, 0xFFAAAA]), 0.8);
-        particle.fillCircle(0, 0, Phaser.Math.Between(2, 5));
+      const particle = this.add.graphics();
+      particle.setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 100);
+      particle.fillStyle(0x9944ff, 0.9);
+      particle.fillCircle(0, 0, 4 + Math.random() * 4);
 
-        this.tweens.add({
-          targets: particle,
-          y: particle.y - 50,
-          alpha: 0,
-          duration: 500,
-          onComplete: () => particle.destroy(),
-        });
-      });
-    }
-
-    // 전체 페이드아웃
-    this.time.delayedCall(1000, () => {
+      const angle = (i / 20) * Math.PI * 2;
       this.tweens.add({
-        targets: [waveLabel, waveNumber, lineLeft, lineRight],
+        targets: particle,
+        x: particle.x + Math.cos(angle) * 150,
+        y: particle.y + Math.sin(angle) * 80,
         alpha: 0,
-        y: '+=30',
-        duration: 300,
-        onComplete: () => {
-          waveLabel.destroy();
-          waveNumber.destroy();
-          lineLeft.destroy();
-          lineRight.destroy();
-        },
+        duration: 800,
+        delay: i * 20,
+        onComplete: () => particle.destroy(),
       });
-    });
-  }
-
-  private onUnitButtonClick(): void {
-    const soundManager = getSoundManager();
-    soundManager?.playButtonClick();
-
-    if (this.currentGold >= ECONOMY.randomUnitCost) {
-      this.gameScene.events.emit('purchaseUnit');
-
-      // Button feedback
-      this.showPurchaseEffect(this.unitButton, '유닛 소환!');
-    } else {
-      this.showInsufficientGold();
     }
-  }
-
-  private onCardButtonClick(): void {
-    const soundManager = getSoundManager();
-    soundManager?.playButtonClick();
-
-    if (this.currentGold >= ECONOMY.randomCardCost) {
-      // Card system placeholder
-      this.showNotImplemented();
-    } else {
-      this.showInsufficientGold();
-    }
-  }
-
-  private showPurchaseEffect(button: Phaser.GameObjects.Container, text: string): void {
-    const effect = this.add.text(button.x, button.y - 50, text, {
-      fontSize: '20px',
-      color: '#00FF00',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5);
-
-    this.tweens.add({
-      targets: effect,
-      y: effect.y - 30,
-      alpha: 0,
-      duration: 800,
-      onComplete: () => effect.destroy(),
-    });
-  }
-
-  private showInsufficientGold(): void {
-    const soundManager = getSoundManager();
-    soundManager?.playInvalidPlacement();
-
-    const warning = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, '골드가 부족합니다!', {
-      fontSize: '32px',
-      color: '#FF0000',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5);
-
-    this.tweens.add({
-      targets: warning,
-      y: warning.y - 30,
-      alpha: 0,
-      duration: 1000,
-      onComplete: () => warning.destroy(),
-    });
-
-    // Shake gold display
-    this.tweens.add({
-      targets: this.goldText,
-      x: this.goldText.x + 5,
-      duration: 50,
-      yoyo: true,
-      repeat: 3,
-    });
-  }
-
-  private showNotImplemented(): void {
-    const text = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, '준비 중입니다...', {
-      fontSize: '28px',
-      color: '#FFFF00',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5);
-
-    this.tweens.add({
-      targets: text,
-      alpha: 0,
-      duration: 1500,
-      onComplete: () => text.destroy(),
-    });
   }
 
   update(): void {
-    // Update gold from game scene
-    const gameScene = this.gameScene as any;
-    if (gameScene.gold !== undefined && gameScene.gold !== this.currentGold) {
-      this.currentGold = gameScene.gold;
-      this.goldText.setText(`${this.currentGold}`);
+    if (!this.player) {
+      this.player = (this.gameScene as any).player;
+      return;
     }
 
-    // Update unit info panel if a unit is selected
-    if (this.selectedUnit && this.selectedUnit.active && this.unitInfoPanel.visible) {
-      // Could update HP here if needed
-    }
+    this.updateHpBar();
+    this.updateExpBar();
+    this.updateSkillCooldowns();
+    this.levelText.setText(`${this.player.level}`);
+    this.goldText.setText(`${this.player.gold}`);
+    this.updateComboDisplay();
   }
 }
