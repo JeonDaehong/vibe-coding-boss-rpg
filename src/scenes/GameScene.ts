@@ -35,6 +35,11 @@ export class GameScene extends Phaser.Scene {
     super({ key: 'GameScene' });
   }
 
+  preload(): void {
+    this.load.image('lily_right', 'assets/images/lily_1.png');
+    this.load.image('lily_left', 'assets/images/lily_2.png');
+  }
+
   create(): void {
     this.mapConfig = MAP_CONFIG[this.currentMap];
     this.groundY = this.mapConfig.groundY;
@@ -781,6 +786,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleInput(): void {
+    // 이동
+    // 대쉬 체크 (더블탭)
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.left)) {
+      this.player.tryDashLeft();
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) {
+      this.player.tryDashRight();
+    }
+
     // 이동
     if (this.cursors.left.isDown) {
       this.player.moveLeft();

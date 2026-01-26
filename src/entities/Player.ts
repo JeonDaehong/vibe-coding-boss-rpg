@@ -47,15 +47,24 @@ export class Player extends Phaser.GameObjects.Container {
   private lastHitTime: number = 0;
 
   // 스프라이트
-  private body_sprite!: Phaser.GameObjects.Graphics;
-  private hair!: Phaser.GameObjects.Graphics;
-  private staff!: Phaser.GameObjects.Graphics;
+  private playerSprite!: Phaser.GameObjects.Sprite;
   private aura!: Phaser.GameObjects.Graphics;
+  private effectsGraphics!: Phaser.GameObjects.Graphics;
 
   // 애니메이션
   private animTimer: number = 0;
   private walkFrame: number = 0;
   private castingEffect: boolean = false;
+  private bobOffset: number = 0;
+
+  // 대쉬
+  private lastLeftTap: number = 0;
+  private lastRightTap: number = 0;
+  private isDashing: boolean = false;
+  private dashCooldown: number = 0;
+  private readonly DASH_DISTANCE: number = 150;
+  private readonly DASH_DOUBLE_TAP_TIME: number = 250;
+  private readonly DASH_COOLDOWN: number = 500;
 
   // 히트박스
   public hitbox = { width: 40, height: 60 };
@@ -86,223 +95,295 @@ export class Player extends Phaser.GameObjects.Container {
     this.aura = this.scene.add.graphics();
     this.add(this.aura);
 
-    // 몸체
-    this.body_sprite = this.scene.add.graphics();
-    this.add(this.body_sprite);
+    // 이펙트용 그래픽스
+    this.effectsGraphics = this.scene.add.graphics();
+    this.add(this.effectsGraphics);
 
-    // 머리카락
-    this.hair = this.scene.add.graphics();
-    this.add(this.hair);
-
-    // 지팡이
-    this.staff = this.scene.add.graphics();
-    this.add(this.staff);
+    // 플레이어 스프라이트
+    this.playerSprite = this.scene.add.sprite(0, 0, 'lily_right');
+    // 이미지 1280x853을 히트박스 높이(60)에 맞춤
+    this.playerSprite.setDisplaySize(200, 150);
+    this.playerSprite.setOrigin(0.3, 0.7);
+    this.add(this.playerSprite);
 
     this.drawPlayer();
   }
 
   private drawPlayer(): void {
-    this.body_sprite.clear();
-    this.hair.clear();
-    this.staff.clear();
     this.aura.clear();
+    this.effectsGraphics.clear();
 
-    const bounce = Math.sin(this.animTimer * 8) * 2;
-    const walk = Math.sin(this.animTimer * 12) * 4;
     const isWalking = Math.abs(this.velocityX) > 10;
 
     // 피격 시 깜빡임
     if (this.isInvincible && Math.floor(this.invincibleTimer * 10) % 2 === 0) {
+      this.playerSprite.setVisible(false);
       return;
+    }
+    this.playerSprite.setVisible(true);
+
+    // 스프라이트 방향 설정 (x축 뒤집기)
+    this.playerSprite.setFlipX(!this.facingRight);
+    // 원점이 중앙(0.5)이 아니므로 뒤집을 때 x 위치 보정
+    // displayWidth=200, origin.x=0.3 -> 보정값 = (0.5 - 0.3) * 200 * 2 = 80
+    const flipOffsetX = this.facingRight ? 0 : -80;
+
+    // 걷기 애니메이션 (상하 움직임 + 기울기)
+    if (isWalking) {
+      this.bobOffset = Math.sin(this.animTimer * 15) * 3;
+      const tilt = Math.sin(this.animTimer * 15) * 0.05 * (this.facingRight ? 1 : -1);
+      this.playerSprite.setRotation(tilt);
+      this.playerSprite.x = flipOffsetX;
+      this.playerSprite.y = this.bobOffset;
+
+      // 걷기 먼지 파티클
+      if (Math.random() < 0.15) {
+        this.createWalkDust();
+      }
+    } else {
+      // 대기 애니메이션 (부드러운 호흡)
+      this.bobOffset = Math.sin(this.animTimer * 3) * 2;
+      this.playerSprite.setRotation(0);
+      this.playerSprite.x = flipOffsetX;
+      this.playerSprite.y = this.bobOffset;
+    }
+
+    // 대쉬 중일 때 잔상 효과
+    if (this.isDashing) {
+      this.playerSprite.setTint(0x00ffff);
+    } else {
+      this.playerSprite.clearTint();
     }
 
     // 암흑 보호막 활성화 시 오라
     if (this.darkShieldActive) {
       this.aura.fillStyle(0x4444aa, 0.3 + Math.sin(this.animTimer * 6) * 0.1);
-      this.aura.fillCircle(0, -25, 45);
-      this.aura.lineStyle(2, 0x6666ff, 0.6);
-      this.aura.strokeCircle(0, -25, 45);
+      this.aura.fillCircle(0, -30, 55);
+      this.aura.lineStyle(3, 0x6666ff, 0.8);
+      this.aura.strokeCircle(0, -30, 55);
+      // 룬 이펙트
+      for (let i = 0; i < 6; i++) {
+        const angle = this.animTimer * 2 + (i / 6) * Math.PI * 2;
+        const rx = Math.cos(angle) * 45;
+        const ry = Math.sin(angle) * 25;
+        this.aura.fillStyle(0x8888ff, 0.7);
+        this.aura.fillCircle(rx, -30 + ry, 4);
+      }
     }
 
     // 소환술사 오라 (기본)
-    this.aura.fillStyle(0x9944ff, 0.15 + Math.sin(this.animTimer * 3) * 0.05);
-    this.aura.fillCircle(0, -25, 35);
+    const auraSize = 45 + Math.sin(this.animTimer * 3) * 5;
+    this.aura.fillStyle(0x9944ff, 0.1 + Math.sin(this.animTimer * 3) * 0.05);
+    this.aura.fillCircle(0, -30, auraSize);
 
-    // 다리 (도트 스타일)
-    this.body_sprite.fillStyle(0x222233);
-    // 왼다리
-    const leftLegOffset = isWalking ? walk : 0;
-    this.body_sprite.fillRect(-8, 5, 6, 20 + leftLegOffset * 0.3);
-    // 오른다리
-    const rightLegOffset = isWalking ? -walk : 0;
-    this.body_sprite.fillRect(2, 5, 6, 20 + rightLegOffset * 0.3);
-
-    // 부츠
-    this.body_sprite.fillStyle(0x443355);
-    this.body_sprite.fillRect(-10, 22 + leftLegOffset * 0.3, 10, 6);
-    this.body_sprite.fillRect(0, 22 + rightLegOffset * 0.3, 10, 6);
-
-    // 로브 (몸통)
-    this.body_sprite.fillStyle(0x332244);
-    this.body_sprite.fillRoundedRect(-15, -30 + bounce, 30, 40, 5);
-
-    // 로브 디테일
-    this.body_sprite.fillStyle(0x443366);
-    this.body_sprite.fillRect(-12, -25 + bounce, 24, 3);
-    this.body_sprite.fillRect(-12, -15 + bounce, 24, 3);
-    this.body_sprite.fillRect(-12, -5 + bounce, 24, 3);
-
-    // 로브 하이라이트
-    this.body_sprite.fillStyle(0x554477, 0.5);
-    this.body_sprite.fillRect(-13, -28 + bounce, 6, 35);
-
-    // 벨트
-    this.body_sprite.fillStyle(0x886644);
-    this.body_sprite.fillRect(-14, 0 + bounce, 28, 5);
-    // 버클
-    this.body_sprite.fillStyle(0xffcc00);
-    this.body_sprite.fillRect(-4, 0 + bounce, 8, 5);
-
-    // 어깨
-    this.body_sprite.fillStyle(0x443366);
-    this.body_sprite.fillCircle(-15, -25 + bounce, 8);
-    this.body_sprite.fillCircle(15, -25 + bounce, 8);
-
-    // 팔
-    const armSwing = isWalking ? Math.sin(this.animTimer * 12) * 8 : Math.sin(this.animTimer * 3) * 3;
-    // 왼팔
-    this.body_sprite.fillStyle(0x332244);
-    this.body_sprite.fillRect(-22, -25 + bounce + armSwing, 8, 25);
-    // 오른팔 (지팡이 든 팔)
-    this.body_sprite.fillRect(14, -25 + bounce - armSwing, 8, 25);
-
-    // 손
-    this.body_sprite.fillStyle(0xffddcc);
-    this.body_sprite.fillCircle(-18, 2 + bounce + armSwing, 5);
-    this.body_sprite.fillCircle(18, 2 + bounce - armSwing, 5);
-
-    // 얼굴 (여성 캐릭터)
-    this.body_sprite.fillStyle(0xffddcc);
-    this.body_sprite.fillCircle(0, -42 + bounce, 14);
-
-    // 얼굴 하이라이트
-    this.body_sprite.fillStyle(0xffeedd, 0.5);
-    this.body_sprite.fillCircle(-4, -45 + bounce, 5);
-
-    // 눈
-    this.body_sprite.fillStyle(0x6644aa);
-    this.body_sprite.fillEllipse(-5, -44 + bounce, 5, 4);
-    this.body_sprite.fillEllipse(5, -44 + bounce, 5, 4);
-    // 눈동자
-    this.body_sprite.fillStyle(0x220033);
-    this.body_sprite.fillCircle(-5, -44 + bounce, 2);
-    this.body_sprite.fillCircle(5, -44 + bounce, 2);
-    // 눈 하이라이트
-    this.body_sprite.fillStyle(0xffffff);
-    this.body_sprite.fillCircle(-6, -45 + bounce, 1);
-    this.body_sprite.fillCircle(4, -45 + bounce, 1);
-
-    // 눈썹
-    this.body_sprite.lineStyle(1, 0x553366);
-    this.body_sprite.beginPath();
-    this.body_sprite.moveTo(-8, -48 + bounce);
-    this.body_sprite.lineTo(-2, -48 + bounce);
-    this.body_sprite.stroke();
-    this.body_sprite.beginPath();
-    this.body_sprite.moveTo(2, -48 + bounce);
-    this.body_sprite.lineTo(8, -48 + bounce);
-    this.body_sprite.stroke();
-
-    // 볼터치
-    this.body_sprite.fillStyle(0xffaaaa, 0.4);
-    this.body_sprite.fillCircle(-9, -40 + bounce, 3);
-    this.body_sprite.fillCircle(9, -40 + bounce, 3);
-
-    // 입 (미소)
-    this.body_sprite.lineStyle(1, 0xcc8888);
-    this.body_sprite.beginPath();
-    this.body_sprite.arc(0, -38 + bounce, 3, 0.2, Math.PI - 0.2, false);
-    this.body_sprite.stroke();
-
-    // 머리카락 (긴 보라색 머리)
-    this.hair.fillStyle(0x6633aa);
-    // 앞머리
-    this.hair.fillRect(-12, -55 + bounce, 24, 12);
-    // 앞머리 웨이브
-    this.hair.fillTriangle(-14, -55 + bounce, -8, -60 + bounce, -2, -55 + bounce);
-    this.hair.fillTriangle(2, -55 + bounce, 8, -60 + bounce, 14, -55 + bounce);
-
-    // 옆머리
-    this.hair.fillRect(-16, -52 + bounce, 5, 25);
-    this.hair.fillRect(11, -52 + bounce, 5, 25);
-
-    // 뒷머리 (길게)
-    this.hair.fillRect(-14, -50 + bounce, 28, 8);
-    this.hair.fillRoundedRect(-12, -42 + bounce, 24, 40, 5);
-
-    // 머리카락 하이라이트
-    this.hair.fillStyle(0x9955cc, 0.5);
-    this.hair.fillRect(-10, -54 + bounce, 4, 10);
-    this.hair.fillRect(2, -42 + bounce, 4, 25);
-
-    // 마녀 모자
-    this.hair.fillStyle(0x221133);
-    // 모자 챙
-    this.hair.fillEllipse(0, -55 + bounce, 24, 6);
-    // 모자 본체
-    this.hair.fillTriangle(-15, -55 + bounce, 0, -85 + bounce, 15, -55 + bounce);
-    // 모자 밴드
-    this.hair.fillStyle(0x9944ff);
-    this.hair.fillRect(-12, -60 + bounce, 24, 4);
-    // 모자 버클
-    this.hair.fillStyle(0xffcc00);
-    this.hair.fillCircle(0, -58 + bounce, 4);
-
-    // 지팡이
-    const staffX = 25;
-    const staffY = -armSwing;
-
-    // 지팡이 막대
-    this.staff.fillStyle(0x442233);
-    this.staff.fillRect(staffX - 3, -30 + bounce + staffY, 6, 55);
-
-    // 지팡이 장식
-    this.staff.fillStyle(0x553344);
-    this.staff.fillRect(staffX - 5, -25 + bounce + staffY, 10, 6);
-    this.staff.fillRect(staffX - 5, -5 + bounce + staffY, 10, 6);
-
-    // 지팡이 머리 (해골)
-    this.staff.fillStyle(0xdddddd);
-    this.staff.fillCircle(staffX, -40 + bounce + staffY, 10);
-    // 해골 눈
-    this.staff.fillStyle(0x9944ff, 0.8 + Math.sin(this.animTimer * 5) * 0.2);
-    this.staff.fillCircle(staffX - 3, -41 + bounce + staffY, 3);
-    this.staff.fillCircle(staffX + 3, -41 + bounce + staffY, 3);
-    // 해골 이빨
-    this.staff.fillStyle(0xffffff);
+    // 마법 파티클
     for (let i = 0; i < 4; i++) {
-      this.staff.fillRect(staffX - 5 + i * 3, -34 + bounce + staffY, 2, 3);
+      const angle = this.animTimer + (i / 4) * Math.PI * 2;
+      const px = Math.cos(angle) * 30;
+      const py = Math.sin(angle) * 15 - 30;
+      this.aura.fillStyle(0xcc66ff, 0.5 + Math.sin(this.animTimer * 5 + i) * 0.3);
+      this.aura.fillCircle(px, py, 3);
     }
 
     // 시전 이펙트
     if (this.castingEffect) {
-      this.aura.fillStyle(0xff6600, 0.6 + Math.sin(this.animTimer * 10) * 0.3);
-      this.aura.fillCircle(staffX, -40 + bounce + staffY, 15);
-      this.aura.lineStyle(2, 0xffaa00, 0.8);
-      this.aura.strokeCircle(staffX, -40 + bounce + staffY, 18 + Math.sin(this.animTimer * 8) * 3);
+      // 손 주변 마법 효과
+      const handX = this.facingRight ? 25 : -25;
+      this.effectsGraphics.fillStyle(0xff6600, 0.8 + Math.sin(this.animTimer * 10) * 0.2);
+      this.effectsGraphics.fillCircle(handX, -25 + this.bobOffset, 18);
+      this.effectsGraphics.lineStyle(3, 0xffaa00, 0.9);
+      this.effectsGraphics.strokeCircle(handX, -25 + this.bobOffset, 22 + Math.sin(this.animTimer * 8) * 4);
+
+      // 스파크 이펙트
+      for (let i = 0; i < 6; i++) {
+        const sparkAngle = this.animTimer * 8 + (i / 6) * Math.PI * 2;
+        const sparkDist = 25 + Math.sin(this.animTimer * 12 + i) * 5;
+        const sx = handX + Math.cos(sparkAngle) * sparkDist;
+        const sy = -25 + this.bobOffset + Math.sin(sparkAngle) * sparkDist * 0.6;
+        this.effectsGraphics.fillStyle(0xffff00, 0.8);
+        this.effectsGraphics.fillCircle(sx, sy, 2);
+      }
     }
   }
 
+  private createWalkDust(): void {
+    const dust = this.scene.add.graphics();
+    dust.setPosition(this.x + Phaser.Math.Between(-10, 10), this.y);
+    dust.fillStyle(0x888888, 0.4);
+    dust.fillCircle(0, 0, 4 + Math.random() * 3);
+    dust.setDepth(this.y - 1);
+
+    this.scene.tweens.add({
+      targets: dust,
+      y: dust.y - 15,
+      alpha: 0,
+      scaleX: 1.5,
+      scaleY: 0.5,
+      duration: 250,
+      onComplete: () => dust.destroy(),
+    });
+  }
+
   public moveLeft(): void {
-    if (this.isDead) return;
+    if (this.isDead || this.isDashing) return;
     this.velocityX = -PHYSICS.playerSpeed;
     this.facingRight = false;
   }
 
   public moveRight(): void {
-    if (this.isDead) return;
+    if (this.isDead || this.isDashing) return;
     this.velocityX = PHYSICS.playerSpeed;
     this.facingRight = true;
+  }
+
+  public tryDashLeft(): void {
+    if (this.isDead || this.isDashing || this.dashCooldown > 0) return;
+
+    const now = this.scene.time.now;
+    if (now - this.lastLeftTap < this.DASH_DOUBLE_TAP_TIME) {
+      this.performDash(-1);
+    }
+    this.lastLeftTap = now;
+  }
+
+  public tryDashRight(): void {
+    if (this.isDead || this.isDashing || this.dashCooldown > 0) return;
+
+    const now = this.scene.time.now;
+    if (now - this.lastRightTap < this.DASH_DOUBLE_TAP_TIME) {
+      this.performDash(1);
+    }
+    this.lastRightTap = now;
+  }
+
+  private performDash(direction: number): void {
+    this.isDashing = true;
+    this.dashCooldown = this.DASH_COOLDOWN;
+    this.facingRight = direction > 0;
+
+    const startX = this.x;
+    const endX = this.x + direction * this.DASH_DISTANCE;
+
+    // 대쉬 시작 이펙트
+    this.createDashStartEffect();
+
+    // 잔상 생성
+    for (let i = 0; i < 5; i++) {
+      this.scene.time.delayedCall(i * 20, () => {
+        this.createDashAfterImage(startX + (endX - startX) * (i / 5));
+      });
+    }
+
+    // 순간이동
+    this.scene.tweens.add({
+      targets: this,
+      x: endX,
+      duration: 80,
+      ease: 'Power2',
+      onComplete: () => {
+        this.isDashing = false;
+        this.createDashEndEffect();
+      },
+    });
+
+    // 무적 프레임
+    this.isInvincible = true;
+    this.invincibleTimer = 0.15;
+
+    // 카메라 효과
+    this.scene.cameras.main.shake(50, 0.003);
+  }
+
+  private createDashStartEffect(): void {
+    // 대쉬 시작 파티클
+    const startEffect = this.scene.add.graphics();
+    startEffect.setPosition(this.x, this.y - 30);
+
+    // 바람 효과
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      startEffect.lineStyle(3, 0x00ffff, 0.8);
+      startEffect.beginPath();
+      startEffect.moveTo(Math.cos(angle) * 10, Math.sin(angle) * 10);
+      startEffect.lineTo(Math.cos(angle) * 30, Math.sin(angle) * 30);
+      startEffect.stroke();
+    }
+
+    startEffect.fillStyle(0x00ffff, 0.6);
+    startEffect.fillCircle(0, 0, 25);
+    startEffect.setDepth(this.y + 1);
+
+    this.scene.tweens.add({
+      targets: startEffect,
+      alpha: 0,
+      scaleX: 2,
+      scaleY: 2,
+      duration: 200,
+      onComplete: () => startEffect.destroy(),
+    });
+  }
+
+  private createDashAfterImage(posX: number): void {
+    const afterImage = this.scene.add.sprite(posX, this.y, 'lily_right');
+    afterImage.setDisplaySize(90, 60);
+    afterImage.setOrigin(0.5, 1);
+    afterImage.setFlipX(!this.facingRight);
+    afterImage.setTint(0x00ffff);
+    afterImage.setAlpha(0.5);
+    afterImage.setDepth(this.y - 1);
+
+    this.scene.tweens.add({
+      targets: afterImage,
+      alpha: 0,
+      scaleX: 0.8,
+      scaleY: 1.2,
+      duration: 200,
+      onComplete: () => afterImage.destroy(),
+    });
+  }
+
+  private createDashEndEffect(): void {
+    // 도착 이펙트
+    const endEffect = this.scene.add.graphics();
+    endEffect.setPosition(this.x, this.y - 30);
+
+    // 전기 스파크
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      endEffect.lineStyle(2, 0x00ffff, 0.9);
+      endEffect.beginPath();
+      const innerRadius = 5;
+      const outerRadius = 20 + Math.random() * 15;
+      endEffect.moveTo(Math.cos(angle) * innerRadius, Math.sin(angle) * innerRadius);
+      endEffect.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius);
+      endEffect.stroke();
+    }
+
+    endEffect.setDepth(this.y + 1);
+
+    this.scene.tweens.add({
+      targets: endEffect,
+      alpha: 0,
+      rotation: 0.5,
+      duration: 150,
+      onComplete: () => endEffect.destroy(),
+    });
+
+    // 링 이펙트
+    const ring = this.scene.add.graphics();
+    ring.setPosition(this.x, this.y - 30);
+    ring.lineStyle(4, 0x00ffff, 0.8);
+    ring.strokeCircle(0, 0, 10);
+    ring.setDepth(this.y + 1);
+
+    this.scene.tweens.add({
+      targets: ring,
+      scaleX: 3,
+      scaleY: 3,
+      alpha: 0,
+      duration: 200,
+      onComplete: () => ring.destroy(),
+    });
   }
 
   public jump(): void {
@@ -410,33 +491,91 @@ export class Player extends Phaser.GameObjects.Container {
 
     this.useSkill('FIREBALL');
     this.castingEffect = true;
-    this.scene.time.delayedCall(100, () => this.castingEffect = false);
+    this.scene.time.delayedCall(150, () => this.castingEffect = false);
 
     const dir = this.facingRight ? 1 : -1;
     const startX = this.x + dir * 30;
-    const startY = this.y - 30;
+    const startY = this.y - 35;
+
+    // 시전 차지 이펙트
+    const chargeEffect = this.scene.add.graphics();
+    chargeEffect.setPosition(startX, startY);
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      chargeEffect.fillStyle(0xff6600, 0.8);
+      chargeEffect.fillCircle(Math.cos(angle) * 40, Math.sin(angle) * 40, 5);
+    }
+    chargeEffect.setDepth(startY + 1);
+
+    this.scene.tweens.add({
+      targets: chargeEffect,
+      scaleX: 0.1,
+      scaleY: 0.1,
+      duration: 100,
+      onComplete: () => chargeEffect.destroy(),
+    });
 
     // 파이어볼 생성
     const fireball = this.scene.add.graphics();
     fireball.setPosition(startX, startY);
-    (fireball as any).velocityX = dir * 600;
+    (fireball as any).velocityX = dir * 700;
     (fireball as any).damage = SKILL_TYPES.FIREBALL.damage + this.attack * 0.5;
     (fireball as any).isActive = true;
 
-    // 파이어볼 그리기
+    // 파이어볼 그리기 (더 화려하게)
     const drawFireball = () => {
       fireball.clear();
-      const time = this.scene.time.now / 100;
-      // 핵심
-      fireball.fillStyle(0xffff00, 0.9);
-      fireball.fillCircle(0, 0, 12);
+      const time = this.scene.time.now / 80;
+
+      // 외곽 글로우
+      fireball.fillStyle(0xff2200, 0.3);
+      fireball.fillCircle(0, 0, 28 + Math.sin(time) * 3);
+
+      // 불꽃 꼬리 (더 많이)
+      for (let i = 0; i < 8; i++) {
+        const tailX = -dir * (8 + i * 10);
+        const tailY = Math.sin(time * 2 + i * 0.5) * (4 + i);
+        fireball.fillStyle(0xff4400, 0.7 - i * 0.08);
+        fireball.fillCircle(tailX, tailY, 12 - i * 1.2);
+      }
+
       // 외곽 불꽃
-      fireball.fillStyle(0xff6600, 0.8);
-      fireball.fillCircle(0, 0, 18 + Math.sin(time) * 2);
-      // 불꽃 꼬리
-      for (let i = 0; i < 5; i++) {
-        fireball.fillStyle(0xff4400, 0.6 - i * 0.1);
-        fireball.fillCircle(-dir * (10 + i * 8), Math.sin(time + i) * 5, 10 - i * 1.5);
+      fireball.fillStyle(0xff6600, 0.9);
+      fireball.fillCircle(0, 0, 20 + Math.sin(time * 1.5) * 2);
+
+      // 중간층
+      fireball.fillStyle(0xffaa00, 0.95);
+      fireball.fillCircle(0, 0, 14);
+
+      // 핵심 (하얀 빛)
+      fireball.fillStyle(0xffffcc, 1);
+      fireball.fillCircle(0, 0, 8);
+
+      // 스파크 이펙트
+      for (let i = 0; i < 4; i++) {
+        const sparkAngle = time * 3 + (i / 4) * Math.PI * 2;
+        const sparkDist = 18 + Math.sin(time * 5 + i) * 3;
+        fireball.fillStyle(0xffff00, 0.8);
+        fireball.fillCircle(Math.cos(sparkAngle) * sparkDist, Math.sin(sparkAngle) * sparkDist, 3);
+      }
+
+      // 트레일 파티클 생성
+      if (Math.random() < 0.4) {
+        const trail = this.scene.add.graphics();
+        trail.setPosition(fireball.x - dir * 15 + Phaser.Math.Between(-5, 5), fireball.y + Phaser.Math.Between(-8, 8));
+        trail.fillStyle(0xff6600, 0.7);
+        trail.fillCircle(0, 0, 4 + Math.random() * 4);
+        trail.setDepth(fireball.depth - 1);
+
+        this.scene.tweens.add({
+          targets: trail,
+          alpha: 0,
+          scaleX: 0.3,
+          scaleY: 0.3,
+          y: trail.y - 20,
+          duration: 200,
+          onComplete: () => trail.destroy(),
+        });
       }
     };
 
@@ -450,7 +589,6 @@ export class Player extends Phaser.GameObjects.Container {
         fireball.setDepth(fireball.y);
         drawFireball();
 
-        // 화면 밖 체크
         if (fireball.x < this.scene.cameras.main.scrollX - 100 ||
             fireball.x > this.scene.cameras.main.scrollX + 1400) {
           (fireball as any).isActive = false;
@@ -458,27 +596,53 @@ export class Player extends Phaser.GameObjects.Container {
         }
       },
       damage: (fireball as any).damage,
-      hitbox: { x: fireball.x, y: fireball.y, width: 30, height: 30 },
-      getHitbox: () => new Phaser.Geom.Rectangle(fireball.x - 15, fireball.y - 15, 30, 30),
+      hitbox: { x: fireball.x, y: fireball.y, width: 35, height: 35 },
+      getHitbox: () => new Phaser.Geom.Rectangle(fireball.x - 17, fireball.y - 17, 35, 35),
       destroy: () => {
         (fireball as any).isActive = false;
-        // 폭발 이펙트
-        const explosion = this.scene.add.graphics();
-        explosion.setPosition(fireball.x, fireball.y);
-        explosion.fillStyle(0xff6600, 0.8);
-        explosion.fillCircle(0, 0, 25);
-        explosion.fillStyle(0xffff00, 0.6);
-        explosion.fillCircle(0, 0, 15);
-        explosion.setDepth(fireball.y + 1);
 
-        this.scene.tweens.add({
-          targets: explosion,
-          scaleX: 2,
-          scaleY: 2,
-          alpha: 0,
-          duration: 200,
-          onComplete: () => explosion.destroy(),
-        });
+        // 대형 폭발 이펙트
+        for (let ring = 0; ring < 3; ring++) {
+          this.scene.time.delayedCall(ring * 50, () => {
+            const explosion = this.scene.add.graphics();
+            explosion.setPosition(fireball.x, fireball.y);
+            explosion.fillStyle(0xff6600, 0.8 - ring * 0.2);
+            explosion.fillCircle(0, 0, 30 + ring * 15);
+            explosion.setDepth(fireball.y + 2);
+
+            this.scene.tweens.add({
+              targets: explosion,
+              scaleX: 1.5 + ring * 0.3,
+              scaleY: 1.5 + ring * 0.3,
+              alpha: 0,
+              duration: 250,
+              onComplete: () => explosion.destroy(),
+            });
+          });
+        }
+
+        // 불꽃 파티클
+        for (let i = 0; i < 15; i++) {
+          const particle = this.scene.add.graphics();
+          particle.setPosition(fireball.x, fireball.y);
+          particle.fillStyle([0xff6600, 0xffaa00, 0xffff00][Math.floor(Math.random() * 3)], 0.9);
+          particle.fillCircle(0, 0, 4 + Math.random() * 5);
+          particle.setDepth(fireball.y + 3);
+
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 50 + Math.random() * 100;
+          this.scene.tweens.add({
+            targets: particle,
+            x: particle.x + Math.cos(angle) * speed,
+            y: particle.y + Math.sin(angle) * speed - 30,
+            alpha: 0,
+            duration: 400,
+            onComplete: () => particle.destroy(),
+          });
+        }
+
+        // 화면 흔들림
+        this.scene.cameras.main.shake(100, 0.008);
         fireball.destroy();
       },
     });
@@ -517,82 +681,161 @@ export class Player extends Phaser.GameObjects.Container {
 
     this.useSkill('BONE_SPIKE');
     this.castingEffect = true;
-    this.scene.time.delayedCall(200, () => this.castingEffect = false);
+    this.scene.time.delayedCall(300, () => this.castingEffect = false);
 
     const dir = this.facingRight ? 1 : -1;
     const damage = SKILL_TYPES.BONE_SPIKE.damage + this.attack * 0.8;
 
-    // 럴커 스타일 뼈 가시 - 여러 개가 연속으로 나옴
-    for (let i = 0; i < 8; i++) {
-      this.scene.time.delayedCall(i * 60, () => {
-        const spikeX = this.x + dir * (60 + i * 50);
+    // 시전 이펙트 - 땅에 균열
+    const groundCrack = this.scene.add.graphics();
+    groundCrack.setPosition(this.x, this.y + 25);
+    groundCrack.lineStyle(3, 0x8866aa, 0.9);
+    for (let i = 0; i < 5; i++) {
+      groundCrack.beginPath();
+      groundCrack.moveTo(0, 0);
+      groundCrack.lineTo(dir * (20 + i * 15), Phaser.Math.Between(-5, 5));
+      groundCrack.stroke();
+    }
+    groundCrack.setDepth(this.y);
+
+    this.scene.tweens.add({
+      targets: groundCrack,
+      alpha: 0,
+      duration: 400,
+      onComplete: () => groundCrack.destroy(),
+    });
+
+    // 럴커 스타일 뼈 가시 - 10개로 증가
+    for (let i = 0; i < 5; i++) {
+      this.scene.time.delayedCall(i * 50, () => {
+        const spikeX = this.x + dir * (50 + i * 55);
         const spikeY = this.y + 20;
+        const spikeHeight = 70 + Math.random() * 30 + (i < 5 ? i * 10 : (9 - i) * 10);
 
         // 뼈 가시 스프라이트
         const spike = this.scene.add.graphics();
         spike.setPosition(spikeX, spikeY);
 
-        // 땅에서 솟아오르는 뼈
-        spike.fillStyle(0xffffcc);
-        spike.fillTriangle(-8, 0, 0, -60 - Math.random() * 20, 8, 0);
-        spike.fillTriangle(-5, -10, 0, -70 - Math.random() * 15, 5, -10);
-        spike.fillTriangle(-12, 0, -4, -40, 0, 0);
-        spike.fillTriangle(0, 0, 4, -40, 12, 0);
+        // 메인 뼈 가시 (더 디테일)
+        spike.fillStyle(0xeeeedd);
+        spike.fillTriangle(-10, 0, 0, -spikeHeight, 10, 0);
 
-        // 어둠 하이라이트
-        spike.fillStyle(0xccccaa, 0.5);
-        spike.fillTriangle(-6, 0, -2, -55, 2, 0);
+        // 보조 뼈
+        spike.fillStyle(0xddddcc);
+        spike.fillTriangle(-15, 0, -6, -spikeHeight * 0.6, 0, 0);
+        spike.fillTriangle(0, 0, 6, -spikeHeight * 0.6, 15, 0);
+
+        // 작은 뼈 조각들
+        spike.fillStyle(0xccccbb);
+        spike.fillTriangle(-18, 0, -12, -spikeHeight * 0.35, -8, 0);
+        spike.fillTriangle(8, 0, 12, -spikeHeight * 0.35, 18, 0);
+
+        // 하이라이트
+        spike.fillStyle(0xffffff, 0.6);
+        spike.fillTriangle(-4, -5, 0, -spikeHeight + 10, 2, -5);
+
+        // 어둠 쉐도우
+        spike.fillStyle(0x886688, 0.4);
+        spike.fillTriangle(2, 0, 6, -spikeHeight * 0.8, 10, 0);
+
+        // 네크로맨서 마법 빛
+        spike.fillStyle(0x9966ff, 0.5);
+        spike.fillCircle(0, -spikeHeight * 0.7, 5);
 
         spike.setDepth(spikeY);
         spike.setScale(0, 0);
 
-        // 솟아오르는 애니메이션
+        // 솟아오르는 애니메이션 (더 강렬하게)
         this.scene.tweens.add({
           targets: spike,
-          scaleY: 1,
+          scaleY: 1.2,
           scaleX: 1,
-          duration: 100,
+          duration: 80,
           ease: 'Back.easeOut',
           onComplete: () => {
+            this.scene.tweens.add({
+              targets: spike,
+              scaleY: 1,
+              duration: 50,
+            });
+
             // 데미지 체크
-            const hitbox = new Phaser.Geom.Rectangle(spikeX - 20, spikeY - 80, 40, 80);
+            const hitbox = new Phaser.Geom.Rectangle(spikeX - 25, spikeY - spikeHeight - 10, 50, spikeHeight + 10);
             this.scene.events.emit('boneSpikeHit', hitbox, damage);
 
+            // 마법 파티클
+            for (let p = 0; p < 4; p++) {
+              const magicParticle = this.scene.add.graphics();
+              magicParticle.setPosition(spikeX + Phaser.Math.Between(-15, 15), spikeY - spikeHeight * Math.random());
+              magicParticle.fillStyle(0xaa88ff, 0.8);
+              magicParticle.fillCircle(0, 0, 3);
+              magicParticle.setDepth(spikeY + 1);
+
+              this.scene.tweens.add({
+                targets: magicParticle,
+                y: magicParticle.y - 30,
+                alpha: 0,
+                duration: 300,
+                delay: p * 30,
+                onComplete: () => magicParticle.destroy(),
+              });
+            }
+
             // 사라지는 애니메이션
-            this.scene.time.delayedCall(200, () => {
+            this.scene.time.delayedCall(250, () => {
               this.scene.tweens.add({
                 targets: spike,
                 scaleY: 0,
+                scaleX: 0.5,
                 alpha: 0,
-                duration: 150,
+                duration: 120,
                 onComplete: () => spike.destroy(),
               });
             });
           },
         });
 
-        // 땅 흔들림 파티클
-        const dust = this.scene.add.graphics();
-        dust.setPosition(spikeX, spikeY);
-        dust.fillStyle(0x666666, 0.6);
-        for (let j = 0; j < 3; j++) {
-          dust.fillCircle((j - 1) * 10, 5, 6);
-        }
-        dust.setDepth(spikeY - 1);
+        // 땅 폭발 파티클 (더 많이)
+        for (let j = 0; j < 6; j++) {
+          const dust = this.scene.add.graphics();
+          dust.setPosition(spikeX + Phaser.Math.Between(-20, 20), spikeY);
+          dust.fillStyle([0x665555, 0x776666, 0x554444][Math.floor(Math.random() * 3)], 0.7);
+          dust.fillCircle(0, 0, 4 + Math.random() * 4);
+          dust.setDepth(spikeY - 1);
 
-        this.scene.tweens.add({
-          targets: dust,
-          y: dust.y - 20,
-          alpha: 0,
-          scaleX: 1.5,
-          duration: 300,
-          onComplete: () => dust.destroy(),
-        });
+          this.scene.tweens.add({
+            targets: dust,
+            x: dust.x + Phaser.Math.Between(-25, 25),
+            y: dust.y - 25 - Math.random() * 20,
+            alpha: 0,
+            duration: 350,
+            onComplete: () => dust.destroy(),
+          });
+        }
+
+        // 작은 뼈 조각 파티클
+        if (Math.random() < 0.5) {
+          const boneShard = this.scene.add.graphics();
+          boneShard.setPosition(spikeX + Phaser.Math.Between(-10, 10), spikeY - 20);
+          boneShard.fillStyle(0xddddcc, 0.9);
+          boneShard.fillTriangle(-3, 0, 0, -8, 3, 0);
+          boneShard.setDepth(spikeY + 1);
+
+          this.scene.tweens.add({
+            targets: boneShard,
+            x: boneShard.x + Phaser.Math.Between(-40, 40),
+            y: boneShard.y - 40,
+            rotation: Math.random() * 3,
+            alpha: 0,
+            duration: 400,
+            onComplete: () => boneShard.destroy(),
+          });
+        }
       });
     }
 
-    this.createCastEffect(0xffffcc);
-    this.scene.cameras.main.shake(200, 0.005);
+    this.createCastEffect(0xaa88ff);
+    this.scene.cameras.main.shake(300, 0.008);
   }
 
   // E - 시체 폭탄
@@ -601,95 +844,167 @@ export class Player extends Phaser.GameObjects.Container {
 
     this.useSkill('CORPSE_BOMB');
     this.castingEffect = true;
-    this.scene.time.delayedCall(300, () => this.castingEffect = false);
+    this.scene.time.delayedCall(400, () => this.castingEffect = false);
 
     const dir = this.facingRight ? 1 : -1;
-    const targetX = this.x + dir * 200;
+    const targetX = this.x + dir * 220;
     const targetY = this.y;
     const damage = SKILL_TYPES.CORPSE_BOMB.damage + this.attack;
-    const radius = SKILL_TYPES.CORPSE_BOMB.radius || 120;
+    const radius = SKILL_TYPES.CORPSE_BOMB.radius || 130;
 
-    // 시체 폭탄 투사체
+    // 시체 폭탄 투사체 컨테이너
+    const bombContainer = this.scene.add.container(this.x + dir * 30, this.y - 30);
+
+    // 메인 폭탄
     const bomb = this.scene.add.graphics();
-    bomb.setPosition(this.x + dir * 30, this.y - 20);
+    bomb.fillStyle(0x445522);
+    bomb.fillCircle(0, 0, 18);
+    bomb.fillStyle(0x668833, 0.7);
+    bomb.fillCircle(-4, -4, 8);
+    // 독기 글로우
+    bomb.fillStyle(0x66ff44, 0.4);
+    bomb.fillCircle(0, 0, 25);
 
-    // 시체 모양 (구체)
-    bomb.fillStyle(0x556633);
-    bomb.fillCircle(0, 0, 15);
-    bomb.fillStyle(0x88aa44, 0.5);
-    bomb.fillCircle(-3, -3, 6);
-    // 독기
-    bomb.fillStyle(0x44ff44, 0.4);
-    bomb.fillCircle(5, -5, 8);
+    // 회전하는 독 파티클
+    const poisonOrbit = this.scene.add.graphics();
+    bombContainer.add(bomb);
+    bombContainer.add(poisonOrbit);
+    bombContainer.setDepth(this.y + 1);
 
-    bomb.setDepth(this.y + 1);
+    let bombRotation = 0;
 
-    // 포물선 이동
+    // 포물선 이동 (곡선 추가)
+    const startY = this.y - 30;
     this.scene.tweens.add({
-      targets: bomb,
+      targets: bombContainer,
       x: targetX,
-      y: targetY,
-      duration: 500,
-      ease: 'Quad.easeIn',
-      onUpdate: () => {
-        // 궤적에 독기 파티클
-        const trail = this.scene.add.graphics();
-        trail.setPosition(bomb.x, bomb.y);
-        trail.fillStyle(0x88ff44, 0.5);
-        trail.fillCircle(0, 0, 5 + Math.random() * 5);
-        trail.setDepth(bomb.depth - 1);
+      duration: 550,
+      ease: 'Linear',
+    });
 
-        this.scene.tweens.add({
-          targets: trail,
-          alpha: 0,
-          scaleX: 0.5,
-          scaleY: 0.5,
-          duration: 200,
-          onComplete: () => trail.destroy(),
-        });
+    // Y축 포물선
+    this.scene.tweens.add({
+      targets: bombContainer,
+      y: { from: startY, to: targetY - 60 },
+      duration: 275,
+      ease: 'Quad.easeOut',
+      yoyo: true,
+      onUpdate: () => {
+        // 회전 효과
+        bombRotation += 0.15;
+        poisonOrbit.clear();
+        for (let i = 0; i < 4; i++) {
+          const angle = bombRotation + (i / 4) * Math.PI * 2;
+          poisonOrbit.fillStyle(0x88ff44, 0.6);
+          poisonOrbit.fillCircle(Math.cos(angle) * 22, Math.sin(angle) * 22, 5);
+        }
+
+        // 독 트레일
+        if (Math.random() < 0.6) {
+          const trail = this.scene.add.graphics();
+          trail.setPosition(bombContainer.x + Phaser.Math.Between(-8, 8), bombContainer.y + Phaser.Math.Between(-8, 8));
+          trail.fillStyle([0x88ff44, 0x66dd33, 0xaaff66][Math.floor(Math.random() * 3)], 0.7);
+          trail.fillCircle(0, 0, 4 + Math.random() * 5);
+          trail.setDepth(bombContainer.depth - 1);
+
+          this.scene.tweens.add({
+            targets: trail,
+            alpha: 0,
+            scaleX: 0.3,
+            scaleY: 0.3,
+            y: trail.y + 15,
+            duration: 250,
+            onComplete: () => trail.destroy(),
+          });
+        }
       },
       onComplete: () => {
-        bomb.destroy();
+        bombContainer.destroy();
 
-        // 폭발!
-        const explosion = this.scene.add.graphics();
-        explosion.setPosition(targetX, targetY);
+        // 대폭발! 여러 단계
+        for (let stage = 0; stage < 4; stage++) {
+          this.scene.time.delayedCall(stage * 60, () => {
+            const explosion = this.scene.add.graphics();
+            explosion.setPosition(targetX, targetY);
 
-        // 폭발 원
-        explosion.fillStyle(0x88ff44, 0.7);
-        explosion.fillCircle(0, 0, radius);
-        explosion.fillStyle(0xccff88, 0.5);
-        explosion.fillCircle(0, 0, radius * 0.6);
-        explosion.fillStyle(0xffffff, 0.3);
-        explosion.fillCircle(0, 0, radius * 0.3);
-        explosion.setDepth(targetY + 2);
+            const stageRadius = radius * (0.4 + stage * 0.2);
+            explosion.fillStyle([0x66ff44, 0x88ff66, 0xaaff88, 0xccffaa][stage], 0.8 - stage * 0.15);
+            explosion.fillCircle(0, 0, stageRadius);
+            explosion.setDepth(targetY + 2 + stage);
 
-        this.scene.tweens.add({
-          targets: explosion,
-          scaleX: 1.5,
-          scaleY: 1.5,
-          alpha: 0,
-          duration: 400,
-          onComplete: () => explosion.destroy(),
-        });
+            this.scene.tweens.add({
+              targets: explosion,
+              scaleX: 1.3,
+              scaleY: 1.3,
+              alpha: 0,
+              duration: 300,
+              onComplete: () => explosion.destroy(),
+            });
+          });
+        }
 
-        // 독 파티클
-        for (let i = 0; i < 15; i++) {
+        // 독 스플래시 파티클 (많이)
+        for (let i = 0; i < 25; i++) {
           const particle = this.scene.add.graphics();
           particle.setPosition(targetX, targetY);
-          particle.fillStyle(0x88ff44, 0.8);
-          particle.fillCircle(0, 0, 8 + Math.random() * 8);
-          particle.setDepth(targetY + 1);
+          particle.fillStyle([0x88ff44, 0x66dd22, 0xaaff66][Math.floor(Math.random() * 3)], 0.9);
+          const pSize = 6 + Math.random() * 10;
+          particle.fillCircle(0, 0, pSize);
+          particle.setDepth(targetY + 3);
 
-          const angle = Math.random() * Math.PI * 2;
-          const dist = Math.random() * radius;
+          const angle = (i / 25) * Math.PI * 2 + Math.random() * 0.3;
+          const dist = 30 + Math.random() * radius;
           this.scene.tweens.add({
             targets: particle,
             x: particle.x + Math.cos(angle) * dist,
-            y: particle.y + Math.sin(angle) * dist - 30,
+            y: particle.y + Math.sin(angle) * dist * 0.7 - 40,
+            alpha: 0,
+            scaleX: 0.3,
+            scaleY: 0.3,
+            duration: 500 + Math.random() * 200,
+            onComplete: () => particle.destroy(),
+          });
+        }
+
+        // 독 연기 기둥
+        for (let s = 0; s < 5; s++) {
+          const smoke = this.scene.add.graphics();
+          smoke.setPosition(targetX + Phaser.Math.Between(-radius * 0.5, radius * 0.5), targetY);
+          smoke.fillStyle(0x88ff44, 0.4);
+          smoke.fillCircle(0, 0, 20 + Math.random() * 15);
+          smoke.setDepth(targetY + 1);
+
+          this.scene.tweens.add({
+            targets: smoke,
+            y: smoke.y - 80 - Math.random() * 40,
+            scaleX: 2,
+            scaleY: 2,
+            alpha: 0,
+            duration: 800,
+            delay: s * 50,
+            onComplete: () => smoke.destroy(),
+          });
+        }
+
+        // 해골 이펙트 (독에서 튀어나오는)
+        for (let sk = 0; sk < 3; sk++) {
+          const skull = this.scene.add.graphics();
+          skull.setPosition(targetX + Phaser.Math.Between(-40, 40), targetY);
+          skull.fillStyle(0xddddcc, 0.8);
+          skull.fillCircle(0, 0, 10);
+          skull.fillStyle(0x228822);
+          skull.fillCircle(-3, -2, 3);
+          skull.fillCircle(3, -2, 3);
+          skull.setDepth(targetY + 4);
+
+          this.scene.tweens.add({
+            targets: skull,
+            y: skull.y - 60 - Math.random() * 30,
+            rotation: Math.random() * 4 - 2,
             alpha: 0,
             duration: 600,
-            onComplete: () => particle.destroy(),
+            delay: sk * 80,
+            onComplete: () => skull.destroy(),
           });
         }
 
@@ -697,7 +1012,8 @@ export class Player extends Phaser.GameObjects.Container {
         const hitbox = new Phaser.Geom.Circle(targetX, targetY, radius);
         this.scene.events.emit('corpseBombHit', hitbox, damage);
 
-        this.scene.cameras.main.shake(200, 0.01);
+        this.scene.cameras.main.shake(250, 0.015);
+        this.scene.cameras.main.flash(100, 100, 255, 100, false);
       },
     });
 
@@ -885,81 +1201,197 @@ export class Player extends Phaser.GameObjects.Container {
 
     this.useSkill('DEATH_WAVE');
     this.castingEffect = true;
-    this.scene.time.delayedCall(500, () => this.castingEffect = false);
+    this.scene.time.delayedCall(600, () => this.castingEffect = false);
 
     const damage = SKILL_TYPES.DEATH_WAVE.damage + this.attack * 1.2;
-    const radius = SKILL_TYPES.DEATH_WAVE.radius || 200;
+    const radius = SKILL_TYPES.DEATH_WAVE.radius || 220;
 
-    // 죽음의 파동 - 동심원 확산
-    for (let i = 0; i < 3; i++) {
-      this.scene.time.delayedCall(i * 150, () => {
-        const wave = this.scene.add.graphics();
-        wave.setPosition(this.x, this.y - 20);
-        wave.lineStyle(5, 0x220022, 0.9);
-        wave.strokeCircle(0, 0, 30);
-        wave.fillStyle(0x440044, 0.4);
-        wave.fillCircle(0, 0, 30);
-        wave.setDepth(this.y + 2);
+    // 시전 준비 - 에너지 수집
+    for (let e = 0; e < 12; e++) {
+      const energy = this.scene.add.graphics();
+      const startAngle = (e / 12) * Math.PI * 2;
+      const startDist = 80 + Math.random() * 40;
+      energy.setPosition(this.x + Math.cos(startAngle) * startDist, this.y - 30 + Math.sin(startAngle) * startDist * 0.5);
+      energy.fillStyle(0x8844aa, 0.8);
+      energy.fillCircle(0, 0, 5);
+      energy.setDepth(this.y + 1);
+
+      this.scene.tweens.add({
+        targets: energy,
+        x: this.x,
+        y: this.y - 30,
+        scaleX: 0.5,
+        scaleY: 0.5,
+        duration: 200,
+        delay: e * 15,
+        onComplete: () => energy.destroy(),
+      });
+    }
+
+    // 메인 폭발 (약간 딜레이 후)
+    this.scene.time.delayedCall(180, () => {
+      // 중앙 폭발
+      const coreBlast = this.scene.add.graphics();
+      coreBlast.setPosition(this.x, this.y - 20);
+      coreBlast.fillStyle(0x9955cc, 0.9);
+      coreBlast.fillCircle(0, 0, 40);
+      coreBlast.fillStyle(0xcc88ff, 0.7);
+      coreBlast.fillCircle(0, 0, 25);
+      coreBlast.fillStyle(0xffffff, 0.5);
+      coreBlast.fillCircle(0, 0, 10);
+      coreBlast.setDepth(this.y + 5);
+
+      this.scene.tweens.add({
+        targets: coreBlast,
+        scaleX: 2,
+        scaleY: 2,
+        alpha: 0,
+        duration: 250,
+        onComplete: () => coreBlast.destroy(),
+      });
+
+      // 죽음의 파동 - 5개의 동심원
+      for (let i = 0; i < 5; i++) {
+        this.scene.time.delayedCall(i * 80, () => {
+          const wave = this.scene.add.graphics();
+          wave.setPosition(this.x, this.y - 20);
+
+          // 파동 라인
+          wave.lineStyle(8 - i, [0x6622aa, 0x8833bb, 0x9944cc, 0xaa55dd, 0xbb66ee][i], 0.9 - i * 0.1);
+          wave.strokeCircle(0, 0, 25);
+
+          // 내부 필
+          wave.fillStyle([0x440066, 0x550077, 0x660088, 0x770099, 0x8800aa][i], 0.3 - i * 0.05);
+          wave.fillCircle(0, 0, 25);
+
+          wave.setDepth(this.y + 2 + i);
+
+          this.scene.tweens.add({
+            targets: wave,
+            scaleX: (radius / 25) * (1 + i * 0.1),
+            scaleY: (radius / 25) * 0.5 * (1 + i * 0.1),
+            alpha: 0,
+            duration: 450,
+            ease: 'Quad.easeOut',
+            onComplete: () => wave.destroy(),
+          });
+        });
+      }
+
+      // 해골 파티클 (더 많이, 더 화려하게)
+      for (let i = 0; i < 16; i++) {
+        const skull = this.scene.add.graphics();
+        skull.setPosition(this.x, this.y - 20);
+
+        // 더 디테일한 해골
+        skull.fillStyle(0xeeeedd, 0.9);
+        skull.fillCircle(0, 0, 10);
+        skull.fillStyle(0x6622aa, 0.8);
+        skull.fillCircle(-3, -2, 3);
+        skull.fillCircle(3, -2, 3);
+        skull.fillStyle(0x220022);
+        skull.fillRect(-4, 4, 8, 3);
+        // 이빨
+        skull.fillStyle(0xffffff, 0.7);
+        for (let t = 0; t < 3; t++) {
+          skull.fillRect(-3 + t * 2, 4, 1, 2);
+        }
+
+        skull.setDepth(this.y + 4);
+
+        const angle = (i / 16) * Math.PI * 2;
+        const dist = radius * (0.8 + Math.random() * 0.4);
+        this.scene.tweens.add({
+          targets: skull,
+          x: skull.x + Math.cos(angle) * dist,
+          y: skull.y + Math.sin(angle) * dist * 0.5 - 20,
+          alpha: 0,
+          rotation: Math.PI * 3,
+          scaleX: 0.5,
+          scaleY: 0.5,
+          duration: 600,
+          delay: Math.random() * 100,
+          ease: 'Quad.easeOut',
+          onComplete: () => skull.destroy(),
+        });
+      }
+
+      // 영혼 파티클
+      for (let sp = 0; sp < 20; sp++) {
+        const spirit = this.scene.add.graphics();
+        spirit.setPosition(this.x + Phaser.Math.Between(-30, 30), this.y - 20 + Phaser.Math.Between(-20, 20));
+        spirit.fillStyle(0xaa77dd, 0.7);
+        spirit.fillCircle(0, 0, 4 + Math.random() * 4);
+        // 꼬리
+        spirit.fillStyle(0x8855bb, 0.5);
+        spirit.fillEllipse(0, 8, 4, 10);
+        spirit.setDepth(this.y + 3);
+
+        const spAngle = Math.random() * Math.PI * 2;
+        const spDist = 50 + Math.random() * (radius - 50);
+        this.scene.tweens.add({
+          targets: spirit,
+          x: spirit.x + Math.cos(spAngle) * spDist,
+          y: spirit.y + Math.sin(spAngle) * spDist * 0.5 - 40,
+          rotation: Math.random() * 2 - 1,
+          alpha: 0,
+          duration: 700,
+          delay: sp * 20,
+          onComplete: () => spirit.destroy(),
+        });
+      }
+
+      // 바닥 균열 이펙트
+      for (let c = 0; c < 8; c++) {
+        const crack = this.scene.add.graphics();
+        crack.setPosition(this.x, this.y + 25);
+        const crackAngle = (c / 8) * Math.PI * 2;
+        crack.lineStyle(3, 0x6622aa, 0.8);
+        crack.beginPath();
+        crack.moveTo(0, 0);
+        let px = 0, py = 0;
+        for (let seg = 0; seg < 5; seg++) {
+          px += Math.cos(crackAngle + Phaser.Math.Between(-20, 20) * 0.01) * 25;
+          py += Math.sin(crackAngle + Phaser.Math.Between(-20, 20) * 0.01) * 15;
+          crack.lineTo(px, py);
+        }
+        crack.stroke();
+        crack.setDepth(this.y - 1);
 
         this.scene.tweens.add({
-          targets: wave,
-          scaleX: radius / 30,
-          scaleY: (radius / 30) * 0.6,
+          targets: crack,
           alpha: 0,
-          duration: 400,
-          onComplete: () => wave.destroy(),
+          duration: 600,
+          delay: c * 30,
+          onComplete: () => crack.destroy(),
         });
-      });
-    }
+      }
 
-    // 해골 파티클
-    for (let i = 0; i < 8; i++) {
-      const skull = this.scene.add.graphics();
-      skull.setPosition(this.x, this.y - 20);
+      // 어둠 필드
+      const darkness = this.scene.add.graphics();
+      darkness.setPosition(this.x, this.y);
+      darkness.fillStyle(0x110011, 0.6);
+      darkness.fillCircle(0, -20, radius);
+      darkness.setDepth(this.y);
 
-      // 해골 그리기
-      skull.fillStyle(0xdddddd, 0.8);
-      skull.fillCircle(0, 0, 8);
-      skull.fillStyle(0x220022);
-      skull.fillCircle(-3, -1, 2);
-      skull.fillCircle(3, -1, 2);
-      skull.fillRect(-3, 3, 6, 2);
-
-      skull.setDepth(this.y + 3);
-
-      const angle = (i / 8) * Math.PI * 2;
       this.scene.tweens.add({
-        targets: skull,
-        x: skull.x + Math.cos(angle) * radius,
-        y: skull.y + Math.sin(angle) * radius * 0.6,
+        targets: darkness,
         alpha: 0,
-        rotation: Math.PI * 2,
-        duration: 500,
-        delay: 100,
-        onComplete: () => skull.destroy(),
+        scaleX: 1.2,
+        scaleY: 0.8,
+        duration: 700,
+        onComplete: () => darkness.destroy(),
       });
-    }
 
-    // 어둠 이펙트
-    const darkness = this.scene.add.graphics();
-    darkness.setPosition(this.x, this.y);
-    darkness.fillStyle(0x000000, 0.5);
-    darkness.fillCircle(0, 0, radius);
-    darkness.setDepth(this.y);
+      // 데미지 히트박스
+      const hitbox = new Phaser.Geom.Circle(this.x, this.y, radius);
+      this.scene.events.emit('deathWaveHit', hitbox, damage);
 
-    this.scene.tweens.add({
-      targets: darkness,
-      alpha: 0,
-      duration: 600,
-      onComplete: () => darkness.destroy(),
+      this.scene.cameras.main.shake(350, 0.02);
+      this.scene.cameras.main.flash(150, 80, 30, 120, false);
     });
 
-    // 데미지 히트박스
-    const hitbox = new Phaser.Geom.Circle(this.x, this.y, radius);
-    this.scene.events.emit('deathWaveHit', hitbox, damage);
-
-    this.scene.cameras.main.shake(300, 0.015);
-    this.createCastEffect(0x220022);
+    this.createCastEffect(0x8844aa);
   }
 
   private createCastEffect(color: number): void {
@@ -1247,6 +1679,11 @@ export class Player extends Phaser.GameObjects.Container {
       }
     }
 
+    // 대쉬 쿨다운
+    if (this.dashCooldown > 0) {
+      this.dashCooldown -= delta;
+    }
+
     // 자연 회복
     this.currentHealth = Math.min(this.maxHealth, this.currentHealth + PLAYER_STATS.healthRegen * (delta / 1000));
 
@@ -1282,9 +1719,6 @@ export class Player extends Phaser.GameObjects.Container {
 
     // 속도 감쇠
     this.velocityX *= 0.85;
-
-    // 방향 설정
-    this.setScale(this.facingRight ? 1 : -1, 1);
 
     // 스프라이트 업데이트
     this.drawPlayer();
