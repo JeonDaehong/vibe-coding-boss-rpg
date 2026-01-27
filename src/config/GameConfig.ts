@@ -38,66 +38,66 @@ export enum MapType {
 // 맵 설정
 export const MAP_CONFIG = {
   [MapType.VILLAGE]: {
-    name: '네온 시티',
+    name: '어둠의 마을',
     width: 1600,
     groundY: 580,
     hasMonsters: false,
     hasBoss: false,
     nextMap: MapType.FIELD,
     portalX: 1500,
-    ambientColor: 0x1a1a2e,
+    ambientColor: 0x0a0812,
   },
   [MapType.FIELD]: {
-    name: '폐허 거리',
+    name: '저주받은 숲',
     width: 2400,
     groundY: 580,
     hasMonsters: true,
     hasBoss: false,
     nextMap: MapType.BOSS,
     portalX: 2300,
-    ambientColor: 0x16213e,
+    ambientColor: 0x080a06,
   },
   [MapType.BOSS]: {
-    name: '트롤왕의 영역',
+    name: '암흑군주의 영역',
     width: 1600,
     groundY: 580,
     hasMonsters: false,
     hasBoss: true,
     nextMap: null,
     portalX: null,
-    ambientColor: 0x0f0f23,
+    ambientColor: 0x0a0410,
   },
 };
 
 // 몬스터 타입
 export const MONSTER_TYPES = {
-  CYBER_SLIME: {
-    name: '사이버 슬라임',
+  SHADOW_SPRITE: {
+    name: '그림자 요정',
     health: 60,
     attack: 12,
     exp: 25,
     gold: 15,
-    color: 0x00ff88,
+    color: 0x6644aa,
     size: { width: 35, height: 30 },
     speed: 60,
   },
-  DRONE: {
-    name: '경비 드론',
+  DARK_WOLF: {
+    name: '어둠 늑대',
     health: 45,
     attack: 18,
     exp: 30,
     gold: 20,
-    color: 0xff4466,
+    color: 0x442244,
     size: { width: 40, height: 25 },
     speed: 100,
   },
-  MUTANT: {
-    name: '변이체',
+  UNDEAD_KNIGHT: {
+    name: '언데드 기사',
     health: 100,
     attack: 22,
     exp: 45,
     gold: 30,
-    color: 0x9944ff,
+    color: 0x334422,
     size: { width: 45, height: 50 },
     speed: 50,
   },
@@ -105,19 +105,19 @@ export const MONSTER_TYPES = {
 
 // 보스 설정
 export const BOSS_CONFIG = {
-  TROLL_KING: {
-    name: '트롤왕 그룬딕',
-    health: 2000,
-    attack: 45,
-    defense: 15,
-    exp: 500,
-    gold: 300,
-    size: { width: 120, height: 150 },
-    color: 0x44aa44,
+  DARK_LORD: {
+    name: '암흑군주 모르가스',
+    health: 3000,
+    attack: 50,
+    defense: 12,
+    exp: 800,
+    gold: 500,
+    size: { width: 100, height: 160 },
+    color: 0x220033,
     phases: [
-      { healthPercent: 1.0, attackSpeed: 1.0, moveSpeed: 80 },
-      { healthPercent: 0.6, attackSpeed: 1.3, moveSpeed: 100 },
-      { healthPercent: 0.3, attackSpeed: 1.6, moveSpeed: 120 },
+      { healthPercent: 1.0, attackSpeed: 1.0, moveSpeed: 40 },
+      { healthPercent: 0.7, attackSpeed: 1.3, moveSpeed: 50 },
+      { healthPercent: 0.3, attackSpeed: 1.8, moveSpeed: 60 },
     ],
   },
 };
@@ -125,24 +125,23 @@ export const BOSS_CONFIG = {
 // 스킬 타입
 export const SKILL_TYPES = {
   FIREBALL: {
-    name: '파이어볼',
+    name: '암흑 화염',
     key: 'CTRL',
     manaCost: 8,
     cooldown: 300,
     damage: 30,
-    description: '화염구를 발사합니다',
-    color: 0xff6600,
+    description: '암흑 화염구를 발사합니다',
+    color: 0x660033,
   },
-  GHOUL_SUMMON: {
-    name: '구울 소환',
+  DARK_SPIKE: {
+    name: '다크 스파이크',
     key: 'Q',
-    manaCost: 0,
-    cooldown: 8000,
-    damage: 0,
-    duration: 60000,
-    maxCount: 3,
-    description: '구울을 소환합니다 (1분간 지속)',
-    color: 0x664488,
+    manaCost: 20,
+    cooldown: 5000,
+    damage: 40,
+    spikeCount: 3,
+    description: '하늘에서 암흑 가시가 3개 낙하합니다',
+    color: 0x440066,
   },
   BONE_SPIKE: {
     name: '뼈가시',
@@ -151,27 +150,28 @@ export const SKILL_TYPES = {
     cooldown: 4000,
     damage: 45,
     description: '관통하는 뼈가시를 발사합니다',
-    color: 0xffffcc,
+    color: 0x886677,
   },
   CORPSE_BOMB: {
-    name: '시체 폭탄',
+    name: '네크로 폭탄',
     key: 'E',
     manaCost: 50,
     cooldown: 6000,
     damage: 80,
     radius: 120,
-    description: '범위 폭발을 일으킵니다',
-    color: 0x88ff44,
+    description: '네크로 에너지로 범위 폭발을 일으킵니다',
+    color: 0x663388,
   },
-  GIANT_GHOUL: {
-    name: '거대 구울',
+  DARK_METEOR: {
+    name: '다크 메테오',
     key: 'R',
     manaCost: 100,
-    cooldown: 60000,
-    damage: 0,
-    duration: 20000,
-    description: '강력한 거대 구울을 소환합니다',
-    color: 0x663399,
+    cooldown: 45000,
+    damage: 120,
+    meteorCount: 8,
+    radius: 80,
+    description: '맵 전체에 암흑 운석을 떨어뜨립니다',
+    color: 0x330044,
   },
   DARK_SHIELD: {
     name: '암흑 보호막',
@@ -181,7 +181,7 @@ export const SKILL_TYPES = {
     duration: 8000,
     damageReduction: 0.5,
     description: '받는 피해를 50% 감소시킵니다',
-    color: 0x4444aa,
+    color: 0x220044,
   },
   CURSE: {
     name: '저주',
@@ -191,7 +191,7 @@ export const SKILL_TYPES = {
     duration: 6000,
     debuffAmount: 0.3,
     description: '적의 공격력을 30% 감소시킵니다',
-    color: 0x660066,
+    color: 0x330033,
   },
   SOUL_DRAIN: {
     name: '영혼 흡수',
@@ -201,7 +201,7 @@ export const SKILL_TYPES = {
     damage: 60,
     healPercent: 0.5,
     description: '적에게 피해를 주고 체력을 흡수합니다',
-    color: 0x00ffcc,
+    color: 0x005544,
   },
   DEATH_WAVE: {
     name: '죽음의 파동',
@@ -210,30 +210,8 @@ export const SKILL_TYPES = {
     cooldown: 20000,
     damage: 100,
     radius: 200,
-    description: '주변 모든 적에게 피해를 줍니다',
-    color: 0x220022,
-  },
-};
-
-// 소환수 설정
-export const SUMMON_CONFIG = {
-  GHOUL: {
-    health: 120,
-    attack: 25,
-    speed: 140,
-    attackRange: 60,
-    detectRange: 250,
-    color: 0x664488,
-    lifetime: 60000, // 1분
-  },
-  GIANT_GHOUL: {
-    health: 500,
-    attack: 60,
-    speed: 120,
-    attackRange: 80,
-    detectRange: 300,
-    color: 0x553388,
-    lifetime: 60000, // 1분
+    description: '주변 모든 적에게 암흑 피해를 줍니다',
+    color: 0x110011,
   },
 };
 
@@ -258,7 +236,7 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   width: GAME_WIDTH,
   height: GAME_HEIGHT,
   parent: 'game-container',
-  backgroundColor: 0x0a0a15,
+  backgroundColor: 0x050208,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,

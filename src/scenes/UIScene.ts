@@ -146,10 +146,10 @@ export class UIScene extends Phaser.Scene {
 
     const skills = [
       { key: 'Ctrl', name: '파이어볼', skillKey: 'FIREBALL', color: 0xff6600 },
-      { key: 'Q', name: '구울 소환', skillKey: 'GHOUL_SUMMON', color: 0x664488 },
+      { key: 'Q', name: '다크스파이크', skillKey: 'DARK_SPIKE', color: 0x664488 },
       { key: 'W', name: '뼈가시', skillKey: 'BONE_SPIKE', color: 0xffffcc },
       { key: 'E', name: '시체폭탄', skillKey: 'CORPSE_BOMB', color: 0x88ff44 },
-      { key: 'R', name: '거대구울', skillKey: 'GIANT_GHOUL', color: 0x663399 },
+      { key: 'R', name: '다크메테오', skillKey: 'DARK_METEOR', color: 0x663399 },
       { key: 'A', name: '보호막', skillKey: 'DARK_SHIELD', color: 0x4444aa },
       { key: 'S', name: '저주', skillKey: 'CURSE', color: 0x660066 },
       { key: 'D', name: '영혼흡수', skillKey: 'SOUL_DRAIN', color: 0x00ffcc },
@@ -238,16 +238,17 @@ export class UIScene extends Phaser.Scene {
         graphics.arc(0, -3, 6, 0, Math.PI * 2, false);
         graphics.stroke();
         break;
-      case 'GHOUL_SUMMON':
-        // 구울 모양
-        graphics.fillStyle(0xffffff, 0.8);
-        graphics.fillCircle(0, -3, 6);
-        // 뿔
+      case 'DARK_SPIKE':
+        // 하늘에서 내려오는 송곳
         graphics.beginPath();
-        graphics.moveTo(-4, -6);
-        graphics.lineTo(-6, -12);
-        graphics.moveTo(4, -6);
-        graphics.lineTo(6, -12);
+        graphics.moveTo(0, -10);
+        graphics.lineTo(-4, 4);
+        graphics.lineTo(4, 4);
+        graphics.closePath();
+        graphics.stroke();
+        graphics.beginPath();
+        graphics.moveTo(0, -6);
+        graphics.lineTo(0, 6);
         graphics.stroke();
         break;
       case 'BONE_SPIKE':
@@ -266,13 +267,15 @@ export class UIScene extends Phaser.Scene {
         graphics.fillStyle(0xffffff, 0.5);
         graphics.fillCircle(0, -3, 4);
         break;
-      case 'GIANT_GHOUL':
-        // 뿔 달린 모양
+      case 'DARK_METEOR':
+        // 운석 모양
+        graphics.fillStyle(0xffffff, 0.6);
+        graphics.fillCircle(0, -3, 7);
         graphics.beginPath();
-        graphics.moveTo(-6, 0);
-        graphics.lineTo(-4, -8);
-        graphics.moveTo(6, 0);
-        graphics.lineTo(4, -8);
+        graphics.moveTo(4, -8);
+        graphics.lineTo(10, -14);
+        graphics.moveTo(6, -4);
+        graphics.lineTo(12, -8);
         graphics.stroke();
         break;
       case 'DARK_SHIELD':

@@ -1,7 +1,5 @@
 import Phaser from 'phaser';
 import { PHYSICS, PLAYER_STATS, LEVEL_CONFIG, SKILL_TYPES } from '../config/GameConfig';
-import { MinionGhoul } from './MinionGhoul';
-import { Ghoul } from './Ghoul';
 
 export class Player extends Phaser.GameObjects.Container {
   public scene: Phaser.Scene;
@@ -37,10 +35,6 @@ export class Player extends Phaser.GameObjects.Container {
   // 스킬 쿨다운
   private skillCooldowns: Map<string, number> = new Map();
   private lastSkillTime: Map<string, number> = new Map();
-
-  // 소환수
-  public minionGhouls: MinionGhoul[] = [];
-  public giantGhoul: Ghoul | null = null;
 
   // 콤보
   private comboCount: number = 0;
@@ -80,10 +74,10 @@ export class Player extends Phaser.GameObjects.Container {
     this.defense = PLAYER_STATS.defense;
     this.expToNextLevel = LEVEL_CONFIG.baseExp;
 
-    // 스킬 쿨다운 초기화
+    // 스킬 쿨다운 초기화 (처음에 바로 사용 가능하도록 충분히 과거 시간으로)
     for (const skill of Object.keys(SKILL_TYPES)) {
       this.skillCooldowns.set(skill, 0);
-      this.lastSkillTime.set(skill, 0);
+      this.lastSkillTime.set(skill, -100000);
     }
 
     this.createSprite();
@@ -122,8 +116,10 @@ export class Player extends Phaser.GameObjects.Container {
     }
     this.playerSprite.setVisible(true);
 
-    // 스프라이트 방향 설정 (x축 뒤집기)
-    this.playerSprite.setFlipX(!this.facingRight);
+    // 스프라이트 방향 설정 (공격 중에는 전용 텍스처 사용하므로 flipX 안함)
+    if (!this.castingEffect) {
+      this.playerSprite.setFlipX(!this.facingRight);
+    }
     // 원점이 중앙(0.5)이 아니므로 뒤집을 때 x 위치 보정
     // displayWidth=200, origin.x=0.3 -> 보정값 = (0.5 - 0.3) * 200 * 2 = 80
     const flipOffsetX = this.facingRight ? 0 : -80;
@@ -295,95 +291,66 @@ export class Player extends Phaser.GameObjects.Container {
   }
 
   private createDashStartEffect(): void {
-    // 대쉬 시작 파티클
-    const startEffect = this.scene.add.graphics();
-    startEffect.setPosition(this.x, this.y - 30);
+    // 대쉬 시작 - 가벼운 바람 선
+    const dir = this.facingRight ? -1 : 1;
+    for (let i = 0; i < 3; i++) {
+      const line = this.scene.add.graphics();
+      line.setPosition(this.x + dir * (10 + i * 8), this.y - 20 + Phaser.Math.Between(-15, 15));
+      line.lineStyle(2, 0x00ffff, 0.6 - i * 0.15);
+      line.beginPath();
+      line.moveTo(0, 0);
+      line.lineTo(dir * 20, 0);
+      line.stroke();
+      line.setDepth(this.y + 1);
 
-    // 바람 효과
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
-      startEffect.lineStyle(3, 0x00ffff, 0.8);
-      startEffect.beginPath();
-      startEffect.moveTo(Math.cos(angle) * 10, Math.sin(angle) * 10);
-      startEffect.lineTo(Math.cos(angle) * 30, Math.sin(angle) * 30);
-      startEffect.stroke();
+      this.scene.tweens.add({
+        targets: line,
+        alpha: 0,
+        x: line.x + dir * 15,
+        duration: 150,
+        onComplete: () => line.destroy(),
+      });
     }
-
-    startEffect.fillStyle(0x00ffff, 0.6);
-    startEffect.fillCircle(0, 0, 25);
-    startEffect.setDepth(this.y + 1);
-
-    this.scene.tweens.add({
-      targets: startEffect,
-      alpha: 0,
-      scaleX: 2,
-      scaleY: 2,
-      duration: 200,
-      onComplete: () => startEffect.destroy(),
-    });
   }
 
   private createDashAfterImage(posX: number): void {
     const afterImage = this.scene.add.sprite(posX, this.y, 'lily_right');
-    afterImage.setDisplaySize(90, 60);
-    afterImage.setOrigin(0.5, 1);
+    afterImage.setDisplaySize(200, 150);
+    afterImage.setOrigin(0.3, 0.7);
     afterImage.setFlipX(!this.facingRight);
     afterImage.setTint(0x00ffff);
-    afterImage.setAlpha(0.5);
+    afterImage.setAlpha(0.4);
     afterImage.setDepth(this.y - 1);
 
+    // 크기 변하지 않고 제자리에서 투명하게 사라짐
     this.scene.tweens.add({
       targets: afterImage,
       alpha: 0,
-      scaleX: 0.8,
-      scaleY: 1.2,
-      duration: 200,
+      duration: 150,
       onComplete: () => afterImage.destroy(),
     });
   }
 
   private createDashEndEffect(): void {
-    // 도착 이펙트
-    const endEffect = this.scene.add.graphics();
-    endEffect.setPosition(this.x, this.y - 30);
+    // 도착 지점 가벼운 바람 선
+    const dir = this.facingRight ? 1 : -1;
+    for (let i = 0; i < 3; i++) {
+      const line = this.scene.add.graphics();
+      line.setPosition(this.x - dir * (5 + i * 6), this.y - 20 + Phaser.Math.Between(-12, 12));
+      line.lineStyle(2, 0x00ffff, 0.5 - i * 0.12);
+      line.beginPath();
+      line.moveTo(0, 0);
+      line.lineTo(-dir * 18, 0);
+      line.stroke();
+      line.setDepth(this.y + 1);
 
-    // 전기 스파크
-    for (let i = 0; i < 12; i++) {
-      const angle = (i / 12) * Math.PI * 2;
-      endEffect.lineStyle(2, 0x00ffff, 0.9);
-      endEffect.beginPath();
-      const innerRadius = 5;
-      const outerRadius = 20 + Math.random() * 15;
-      endEffect.moveTo(Math.cos(angle) * innerRadius, Math.sin(angle) * innerRadius);
-      endEffect.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius);
-      endEffect.stroke();
+      this.scene.tweens.add({
+        targets: line,
+        alpha: 0,
+        duration: 120,
+        onComplete: () => line.destroy(),
+      });
     }
-
-    endEffect.setDepth(this.y + 1);
-
-    this.scene.tweens.add({
-      targets: endEffect,
-      alpha: 0,
-      rotation: 0.5,
-      duration: 150,
-      onComplete: () => endEffect.destroy(),
-    });
-
-    // 링 이펙트
-    const ring = this.scene.add.graphics();
-    ring.setPosition(this.x, this.y - 30);
-    ring.lineStyle(4, 0x00ffff, 0.8);
-    ring.strokeCircle(0, 0, 10);
-    ring.setDepth(this.y + 1);
-
-    this.scene.tweens.add({
-      targets: ring,
-      scaleX: 3,
-      scaleY: 3,
-      alpha: 0,
-      duration: 200,
-      onComplete: () => ring.destroy(),
-    });
   }
 
   public jump(): void {
@@ -491,7 +458,14 @@ export class Player extends Phaser.GameObjects.Container {
 
     this.useSkill('FIREBALL');
     this.castingEffect = true;
-    this.scene.time.delayedCall(150, () => this.castingEffect = false);
+
+    // 공격 스프라이트 변경
+    this.playerSprite.setTexture(this.facingRight ? 'lily_attack_right' : 'lily_attack_left');
+    this.playerSprite.setFlipX(false);
+    this.scene.time.delayedCall(150, () => {
+      this.castingEffect = false;
+      this.playerSprite.setTexture('lily_right');
+    });
 
     const dir = this.facingRight ? 1 : -1;
     const startX = this.x + dir * 30;
@@ -651,28 +625,127 @@ export class Player extends Phaser.GameObjects.Container {
     this.createCastEffect(0xff6600);
   }
 
-  // Q - 구울 소환
-  public summonGhoulMinion(): void {
-    if (!this.canUseSkill('GHOUL_SUMMON') || this.isDead) return;
-    if (this.minionGhouls.length >= ((SKILL_TYPES as any).GHOUL_SUMMON.maxCount || 3)) {
-      // 가장 오래된 구울 제거
-      const oldest = this.minionGhouls.shift();
-      if (oldest) oldest.destroy();
-    }
+  // Q - 다크 스파이크
+  public castDarkSpike(): void {
+    if (!this.canUseSkill('DARK_SPIKE') || this.isDead) return;
 
-    this.useSkill('GHOUL_SUMMON');
+    this.useSkill('DARK_SPIKE');
     this.castingEffect = true;
     this.scene.time.delayedCall(300, () => this.castingEffect = false);
 
-    const spawnX = this.x + (this.facingRight ? 50 : -50);
-    const ghoul = new MinionGhoul(this.scene, spawnX, this.y, this);
-    this.minionGhouls.push(ghoul);
+    // 공격 스프라이트
+    this.playerSprite.setTexture(this.facingRight ? 'lily_attack_right' : 'lily_attack_left');
+    this.playerSprite.setFlipX(false);
+    this.scene.time.delayedCall(300, () => {
+      this.playerSprite.setTexture('lily_right');
+    });
 
-    // 소환수 리스트에 추가
-    (this.scene as any).summons = (this.scene as any).summons || [];
-    (this.scene as any).summons.push(ghoul);
+    const damage = SKILL_TYPES.DARK_SPIKE.damage + this.attack * 0.8;
+    const spikeCount = (SKILL_TYPES.DARK_SPIKE as any).spikeCount || 3;
 
-    this.createCastEffect(0x664488);
+    // 플레이어 앞쪽에 3개의 스파이크 낙하
+    const dir = this.facingRight ? 1 : -1;
+    for (let i = 0; i < spikeCount; i++) {
+      this.scene.time.delayedCall(i * 200, () => {
+        const targetX = this.x + dir * (80 + i * 100);
+        const targetY = this.y + 20;
+        const startY = targetY - 300;
+
+        // 경고 표시
+        const warning = this.scene.add.graphics();
+        warning.setPosition(targetX, targetY);
+        warning.fillStyle(0x440066, 0.4);
+        warning.fillEllipse(0, 0, 60, 15);
+        warning.setDepth(targetY - 1);
+
+        this.scene.tweens.add({
+          targets: warning,
+          alpha: 0.8,
+          scaleX: 1.2,
+          duration: 150,
+          yoyo: true,
+          onComplete: () => warning.destroy(),
+        });
+
+        // 암흑 송곳 낙하
+        this.scene.time.delayedCall(150, () => {
+          const spike = this.scene.add.graphics();
+          spike.setPosition(targetX, startY);
+
+          // 암흑 송곳 모양
+          spike.fillStyle(0x440066);
+          spike.fillTriangle(-12, 0, 0, 80, 12, 0);
+          spike.fillStyle(0x660088, 0.8);
+          spike.fillTriangle(-6, 5, 0, 75, 6, 5);
+          // 보라 글로우
+          spike.fillStyle(0x8800cc, 0.4);
+          spike.fillCircle(0, 40, 18);
+          spike.setDepth(targetY + 1);
+
+          // 낙하 트윈
+          this.scene.tweens.add({
+            targets: spike,
+            y: targetY - 40,
+            duration: 120,
+            ease: 'Quad.easeIn',
+            onComplete: () => {
+              // 충돌 이펙트
+              const impact = this.scene.add.graphics();
+              impact.setPosition(targetX, targetY);
+              impact.fillStyle(0x660088, 0.7);
+              impact.fillCircle(0, 0, 35);
+              impact.fillStyle(0x8800cc, 0.4);
+              impact.fillCircle(0, 0, 50);
+              impact.setDepth(targetY + 2);
+
+              this.scene.tweens.add({
+                targets: impact,
+                scaleX: 1.5,
+                scaleY: 0.5,
+                alpha: 0,
+                duration: 300,
+                onComplete: () => impact.destroy(),
+              });
+
+              // 파편
+              for (let p = 0; p < 6; p++) {
+                const shard = this.scene.add.graphics();
+                shard.setPosition(targetX, targetY);
+                shard.fillStyle(0x660088, 0.8);
+                shard.fillTriangle(-3, 0, 0, -10, 3, 0);
+                shard.setDepth(targetY + 3);
+                const angle = Math.random() * Math.PI * 2;
+                this.scene.tweens.add({
+                  targets: shard,
+                  x: shard.x + Math.cos(angle) * 40,
+                  y: shard.y + Math.sin(angle) * 40 - 20,
+                  alpha: 0,
+                  rotation: Math.random() * 3,
+                  duration: 300,
+                  onComplete: () => shard.destroy(),
+                });
+              }
+
+              // 데미지 히트박스
+              const hitbox = new Phaser.Geom.Rectangle(targetX - 30, targetY - 80, 60, 80);
+              this.scene.events.emit('darkSpikeHit', hitbox, damage);
+
+              // 사라짐
+              this.scene.tweens.add({
+                targets: spike,
+                alpha: 0,
+                scaleY: 0.5,
+                duration: 200,
+                onComplete: () => spike.destroy(),
+              });
+            },
+          });
+        });
+      });
+    }
+
+    this.createCastEffect(0x440066);
+    this.scene.cameras.main.shake(200, 0.006);
   }
 
   // W - 뼈가시 (관통)
@@ -1020,29 +1093,141 @@ export class Player extends Phaser.GameObjects.Container {
     this.createCastEffect(0x88ff44);
   }
 
-  // R - 거대 구울 소환 (각성기)
-  public summonGiantGhoul(): void {
-    if (!this.canUseSkill('GIANT_GHOUL') || this.isDead) return;
-    if (this.giantGhoul && this.giantGhoul.isAlive) {
-      // 이미 구울이 있으면 소환 불가
-      return;
+  // R - 다크 메테오 (궁극기)
+  public castDarkMeteor(): void {
+    if (!this.canUseSkill('DARK_METEOR') || this.isDead) return;
+
+    this.useSkill('DARK_METEOR');
+    this.castingEffect = true;
+    this.scene.time.delayedCall(600, () => this.castingEffect = false);
+
+    // 공격 스프라이트
+    this.playerSprite.setTexture(this.facingRight ? 'lily_attack_right' : 'lily_attack_left');
+    this.playerSprite.setFlipX(false);
+    this.scene.time.delayedCall(600, () => {
+      this.playerSprite.setTexture('lily_right');
+    });
+
+    const damage = SKILL_TYPES.DARK_METEOR.damage + this.attack * 1.5;
+    const meteorCount = (SKILL_TYPES.DARK_METEOR as any).meteorCount || 8;
+    const radius = (SKILL_TYPES.DARK_METEOR as any).radius || 80;
+    const camX = this.scene.cameras.main.scrollX;
+    const camW = this.scene.cameras.main.width;
+
+    // 시전 연출 - 하늘 어둡게
+    const darkOverlay = this.scene.add.graphics();
+    darkOverlay.fillStyle(0x000000, 0.4);
+    darkOverlay.fillRect(camX, 0, camW, 720);
+    darkOverlay.setDepth(999);
+    this.scene.tweens.add({
+      targets: darkOverlay,
+      alpha: 0,
+      duration: 2000,
+      onComplete: () => darkOverlay.destroy(),
+    });
+
+    // 메테오 랜덤 낙하
+    for (let i = 0; i < meteorCount; i++) {
+      this.scene.time.delayedCall(200 + i * 180, () => {
+        const targetX = camX + 100 + Math.random() * (camW - 200);
+        const targetY = this.y + 20;
+        const startX = targetX - 120;
+        const startY = -50;
+
+        // 메테오 본체
+        const meteor = this.scene.add.graphics();
+        meteor.setPosition(startX, startY);
+
+        // 암흑 운석
+        meteor.fillStyle(0x330044, 0.9);
+        meteor.fillCircle(0, 0, 22);
+        meteor.fillStyle(0x550066, 0.7);
+        meteor.fillCircle(-4, -4, 12);
+        meteor.fillStyle(0x880099, 0.5);
+        meteor.fillCircle(0, 0, 28);
+        meteor.setDepth(1000);
+
+        // 꼬리 트레일 타이머
+        const trailTimer = this.scene.time.addEvent({
+          delay: 30,
+          repeat: 20,
+          callback: () => {
+            const trail = this.scene.add.graphics();
+            trail.setPosition(meteor.x, meteor.y);
+            trail.fillStyle(0x660088, 0.6);
+            trail.fillCircle(0, 0, 10 + Math.random() * 8);
+            trail.setDepth(999);
+            this.scene.tweens.add({
+              targets: trail,
+              alpha: 0,
+              scaleX: 0.3,
+              scaleY: 0.3,
+              duration: 200,
+              onComplete: () => trail.destroy(),
+            });
+          },
+        });
+
+        // 낙하
+        this.scene.tweens.add({
+          targets: meteor,
+          x: targetX,
+          y: targetY - 20,
+          duration: 400,
+          ease: 'Quad.easeIn',
+          onComplete: () => {
+            trailTimer.destroy();
+
+            // 대폭발
+            for (let ring = 0; ring < 3; ring++) {
+              this.scene.time.delayedCall(ring * 40, () => {
+                const blast = this.scene.add.graphics();
+                blast.setPosition(targetX, targetY);
+                blast.fillStyle([0x550066, 0x770088, 0x9900aa][ring], 0.7 - ring * 0.15);
+                blast.fillCircle(0, 0, radius * (0.5 + ring * 0.3));
+                blast.setDepth(1001);
+                this.scene.tweens.add({
+                  targets: blast,
+                  scaleX: 1.5,
+                  scaleY: 1.5,
+                  alpha: 0,
+                  duration: 300,
+                  onComplete: () => blast.destroy(),
+                });
+              });
+            }
+
+            // 파편
+            for (let p = 0; p < 8; p++) {
+              const shard = this.scene.add.graphics();
+              shard.setPosition(targetX, targetY);
+              shard.fillStyle(0x880099, 0.8);
+              shard.fillCircle(0, 0, 4 + Math.random() * 4);
+              shard.setDepth(1002);
+              const angle = Math.random() * Math.PI * 2;
+              this.scene.tweens.add({
+                targets: shard,
+                x: shard.x + Math.cos(angle) * (40 + Math.random() * 60),
+                y: shard.y + Math.sin(angle) * (40 + Math.random() * 60) - 30,
+                alpha: 0,
+                duration: 400,
+                onComplete: () => shard.destroy(),
+              });
+            }
+
+            // 데미지 히트박스
+            const hitbox = new Phaser.Geom.Circle(targetX, targetY, radius);
+            this.scene.events.emit('darkMeteorHit', hitbox, damage);
+
+            meteor.destroy();
+            this.scene.cameras.main.shake(150, 0.012);
+          },
+        });
+      });
     }
 
-    this.useSkill('GIANT_GHOUL');
-    this.castingEffect = true;
-    this.scene.time.delayedCall(500, () => this.castingEffect = false);
-
-    const spawnX = this.x + (this.facingRight ? 80 : -80);
-    this.giantGhoul = new Ghoul(this.scene, spawnX, this.y, this);
-
-    // 소환수 리스트에 추가
-    (this.scene as any).summons = (this.scene as any).summons || [];
-    (this.scene as any).summons.push(this.giantGhoul);
-
-    this.createCastEffect(0x663399);
-
-    // 화면 연출
-    this.scene.cameras.main.flash(300, 100, 50, 150);
+    this.createCastEffect(0x330044);
+    this.scene.cameras.main.flash(200, 50, 0, 80);
   }
 
   // A - 암흑 보호막
@@ -1604,10 +1789,19 @@ export class Player extends Phaser.GameObjects.Container {
   private die(): void {
     this.isDead = true;
 
-    // 죽음 이펙트
+    // 죽음 모션 - 회전 + 페이드
+    this.scene.tweens.add({
+      targets: this,
+      alpha: 0,
+      angle: 360,
+      duration: 1000,
+      ease: 'Quad.easeIn',
+    });
+
+    // 죽음 폭발 이펙트
     const deathEffect = this.scene.add.graphics();
     deathEffect.setPosition(this.x, this.y - 30);
-    deathEffect.fillStyle(0x9944ff, 0.8);
+    deathEffect.fillStyle(0x660033, 0.8);
     deathEffect.fillCircle(0, 0, 40);
     deathEffect.setDepth(this.y + 10);
 
@@ -1616,27 +1810,64 @@ export class Player extends Phaser.GameObjects.Container {
       scaleX: 3,
       scaleY: 3,
       alpha: 0,
-      duration: 500,
+      duration: 600,
       onComplete: () => deathEffect.destroy(),
     });
 
-    // 영혼 이펙트
-    const soul = this.scene.add.graphics();
-    soul.setPosition(this.x, this.y - 30);
-    soul.fillStyle(0xffffff, 0.6);
-    soul.fillCircle(0, 0, 20);
-    soul.setDepth(this.y + 11);
+    // 영혼 파티클 상승
+    for (let i = 0; i < 8; i++) {
+      const soul = this.scene.add.graphics();
+      soul.setPosition(this.x + Phaser.Math.Between(-20, 20), this.y - 20);
+      soul.fillStyle(0xffffff, 0.6);
+      soul.fillCircle(0, 0, 6 + Math.random() * 6);
+      soul.setDepth(this.y + 11);
+
+      this.scene.tweens.add({
+        targets: soul,
+        y: soul.y - 80 - Math.random() * 60,
+        x: soul.x + Phaser.Math.Between(-30, 30),
+        alpha: 0,
+        duration: 1200 + i * 100,
+        delay: i * 80,
+        onComplete: () => soul.destroy(),
+      });
+    }
+
+    this.scene.cameras.main.shake(300, 0.015);
+    this.scene.cameras.main.flash(200, 80, 0, 40);
+
+    this.scene.events.emit('playerDied');
+  }
+
+  public respawn(x: number, y: number): void {
+    this.isDead = false;
+    this.x = x;
+    this.y = y;
+    this.currentHealth = this.maxHealth;
+    this.velocityX = 0;
+    this.velocityY = 0;
+    this.isInvincible = true;
+    this.invincibleTimer = 2;
+    this.angle = 0;
+    this.setAlpha(1);
+    this.darkShieldActive = false;
+    this.damageReduction = 1.0;
+
+    // 부활 이펙트
+    const reviveEffect = this.scene.add.graphics();
+    reviveEffect.setPosition(x, y);
+    reviveEffect.fillStyle(0xffd700, 0.5);
+    reviveEffect.fillCircle(0, -30, 50);
+    reviveEffect.setDepth(y + 10);
 
     this.scene.tweens.add({
-      targets: soul,
-      y: soul.y - 100,
+      targets: reviveEffect,
+      scaleX: 2,
+      scaleY: 2,
       alpha: 0,
-      duration: 1500,
-      onComplete: () => soul.destroy(),
+      duration: 600,
+      onComplete: () => reviveEffect.destroy(),
     });
-
-    this.setAlpha(0.3);
-    this.scene.events.emit('playerDied');
   }
 
   public addCombo(): void {

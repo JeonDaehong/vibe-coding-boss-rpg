@@ -9,7 +9,6 @@ export class GameScene extends Phaser.Scene {
   public monsters: Monster[] = [];
   public boss: TrollKing | null = null;
   public projectiles: any[] = [];
-  public summons: any[] = [];
 
   private currentMap: MapType = MapType.VILLAGE;
   private mapConfig: any;
@@ -38,6 +37,8 @@ export class GameScene extends Phaser.Scene {
   preload(): void {
     this.load.image('lily_right', 'assets/images/lily_1.png');
     this.load.image('lily_left', 'assets/images/lily_2.png');
+    this.load.image('lily_attack_right', 'assets/images/lily_3.png');
+    this.load.image('lily_attack_left', 'assets/images/lily_4.png');
   }
 
   create(): void {
@@ -66,120 +67,230 @@ export class GameScene extends Phaser.Scene {
     const width = this.mapConfig.width;
     const ambientColor = this.mapConfig.ambientColor;
 
-    // 기본 배경
+    // 기본 배경 - 어두운 하늘
     const bg = this.add.graphics();
-    bg.fillGradientStyle(ambientColor, ambientColor, 0x000011, 0x000011);
+    bg.fillGradientStyle(ambientColor, ambientColor, 0x000005, 0x000005);
     bg.fillRect(0, 0, width, GAME_HEIGHT);
     bg.setScrollFactor(0.1);
     this.backgrounds.push(bg);
 
-    // 사이버펑크 도시 스카이라인
-    const skyline = this.add.graphics();
-    skyline.setScrollFactor(0.3);
-
-    // 뒷 건물들
-    for (let i = 0; i < width / 100; i++) {
-      const buildingHeight = 150 + Math.random() * 200;
-      const buildingX = i * 100;
-      const buildingWidth = 60 + Math.random() * 30;
-
-      // 건물 본체
-      skyline.fillStyle(0x111122);
-      skyline.fillRect(buildingX, GAME_HEIGHT - buildingHeight - 100, buildingWidth, buildingHeight);
-
-      // 창문 (네온)
-      const windowColors = [0x00ffff, 0xff00ff, 0xffff00, 0x00ff00];
-      for (let j = 0; j < buildingHeight / 20; j++) {
-        for (let k = 0; k < buildingWidth / 15; k++) {
-          if (Math.random() > 0.3) {
-            skyline.fillStyle(windowColors[Math.floor(Math.random() * windowColors.length)], 0.6);
-            skyline.fillRect(buildingX + 5 + k * 15, GAME_HEIGHT - buildingHeight - 90 + j * 20, 8, 12);
-          }
-        }
-      }
+    if (this.currentMap === MapType.VILLAGE) {
+      this.createVillageBackground(width);
+    } else if (this.currentMap === MapType.FIELD) {
+      this.createFieldBackground(width);
+    } else if (this.currentMap === MapType.BOSS) {
+      this.createBossBackground(width);
     }
-    this.backgrounds.push(skyline);
 
-    // 앞쪽 건물들
-    const buildings = this.add.graphics();
-    buildings.setScrollFactor(0.5);
-
-    for (let i = 0; i < width / 80; i++) {
-      const buildingHeight = 100 + Math.random() * 150;
-      const buildingX = i * 80 + Math.random() * 20;
-      const buildingWidth = 50 + Math.random() * 20;
-
-      // 건물 본체
-      buildings.fillStyle(0x1a1a2e);
-      buildings.fillRect(buildingX, GAME_HEIGHT - buildingHeight - 50, buildingWidth, buildingHeight);
-
-      // 창문
-      for (let j = 0; j < buildingHeight / 25; j++) {
-        for (let k = 0; k < buildingWidth / 12; k++) {
-          if (Math.random() > 0.4) {
-            const windowColor = Math.random() > 0.5 ? 0x00ffff : 0xff66ff;
-            buildings.fillStyle(windowColor, 0.5);
-            buildings.fillRect(buildingX + 3 + k * 12, GAME_HEIGHT - buildingHeight - 40 + j * 25, 6, 15);
-          }
-        }
-      }
-    }
-    this.backgrounds.push(buildings);
-
-    // 네온 간판들
-    this.createNeonSigns();
-
-    // 지면
+    // 지면 - 돌/흙 질감
     const ground = this.add.graphics();
-    // 바닥
-    ground.fillStyle(0x222233);
+    ground.fillStyle(0x1a1510);
     ground.fillRect(0, this.groundY, width, 200);
-    // 바닥 라인
-    ground.lineStyle(3, 0x00ffff, 0.5);
+    // 풀/이끼 라인
+    ground.lineStyle(2, 0x223315, 0.6);
     ground.beginPath();
     ground.moveTo(0, this.groundY);
     ground.lineTo(width, this.groundY);
     ground.stroke();
-    // 바닥 패턴
-    for (let i = 0; i < width; i += 100) {
-      ground.fillStyle(0x333344, 0.5);
-      ground.fillRect(i, this.groundY + 5, 80, 5);
+    // 돌 패턴
+    for (let i = 0; i < width; i += 60) {
+      ground.fillStyle(0x222018, 0.6);
+      ground.fillRect(i, this.groundY + 3, 40 + Math.random() * 15, 4);
+      if (Math.random() < 0.3) {
+        ground.fillStyle(0x181510, 0.4);
+        ground.fillRect(i + 10, this.groundY + 10, 20, 3);
+      }
     }
     ground.setDepth(-1);
     this.backgrounds.push(ground);
   }
 
-  private createNeonSigns(): void {
-    const signTexts = ['CYBER', 'NEON', 'TOKYO', '2077', 'GAME', 'RPG'];
-    const colors = [0x00ffff, 0xff00ff, 0xffff00, 0x00ff00, 0xff4444];
+  private createVillageBackground(width: number): void {
+    // 어둠의 마을 - 돌집, 횃불, 안개, 멀리 보이는 성
+    const far = this.add.graphics();
+    far.setScrollFactor(0.2);
 
-    for (let i = 0; i < this.mapConfig.width / 400; i++) {
-      const sign = this.add.graphics();
-      sign.setPosition(200 + i * 400, 150 + Math.random() * 100);
-      sign.setScrollFactor(0.6);
+    // 멀리 보이는 성 실루엣
+    far.fillStyle(0x0a0812);
+    far.fillRect(width * 0.6, 100, 80, 300);
+    far.fillRect(width * 0.63, 60, 30, 340);
+    far.fillRect(width * 0.7, 120, 60, 280);
+    far.fillTriangle(width * 0.63, 60, width * 0.645, 20, width * 0.66, 60);
+    // 성 창문 빛
+    far.fillStyle(0x442200, 0.4);
+    far.fillRect(width * 0.64, 100, 8, 12);
+    far.fillRect(width * 0.64, 150, 8, 12);
+    this.backgrounds.push(far);
 
-      const color = colors[Math.floor(Math.random() * colors.length)];
+    // 돌집들
+    const houses = this.add.graphics();
+    houses.setScrollFactor(0.7);
+    const housePositions = [100, 350, 600, 900, 1200];
+    for (const hx of housePositions) {
+      const hh = 80 + Math.random() * 40;
+      const hw = 70 + Math.random() * 30;
+      // 돌벽
+      houses.fillStyle(0x2a2520);
+      houses.fillRect(hx, this.groundY - hh, hw, hh);
+      // 지붕
+      houses.fillStyle(0x1a1815);
+      houses.fillTriangle(hx - 10, this.groundY - hh, hx + hw / 2, this.groundY - hh - 30, hx + hw + 10, this.groundY - hh);
+      // 문
+      houses.fillStyle(0x3a2a1a);
+      houses.fillRect(hx + hw / 2 - 10, this.groundY - 35, 20, 35);
+      // 창문 빛
+      houses.fillStyle(0x553300, 0.5);
+      houses.fillRect(hx + 10, this.groundY - hh + 15, 12, 14);
+    }
+    this.backgrounds.push(houses);
 
-      // 네온 테두리
-      sign.lineStyle(4, color, 0.8);
-      sign.strokeRect(-40, -15, 80, 30);
+    // 횃불들
+    for (let i = 0; i < 5; i++) {
+      const torch = this.add.graphics();
+      const tx = 200 + i * 300;
+      torch.setPosition(tx, this.groundY - 50);
+      // 기둥
+      torch.fillStyle(0x3a2a1a);
+      torch.fillRect(-3, 0, 6, 50);
+      // 불꽃 글로우
+      torch.fillStyle(0x884400, 0.3);
+      torch.fillCircle(0, -5, 20);
+      torch.fillStyle(0xff6600, 0.6);
+      torch.fillCircle(0, -5, 8);
+      torch.fillStyle(0xffaa00, 0.8);
+      torch.fillCircle(0, -7, 4);
+      torch.setDepth(this.groundY - 1);
+      this.backgrounds.push(torch);
 
-      // 네온 글로우
-      sign.fillStyle(color, 0.2);
-      sign.fillRect(-45, -20, 90, 40);
-
-      this.neonLights.push(sign);
-
-      // 깜빡임 효과
+      // 깜빡임
       this.tweens.add({
-        targets: sign,
-        alpha: 0.6,
-        duration: 500 + Math.random() * 500,
+        targets: torch,
+        alpha: 0.7,
+        duration: 200 + Math.random() * 300,
         yoyo: true,
         repeat: -1,
-        delay: Math.random() * 1000,
       });
     }
+  }
+
+  private createFieldBackground(width: number): void {
+    // 저주받은 숲 - 뒤틀린 나무, 도깨비불, 폐허
+    const treeLine = this.add.graphics();
+    treeLine.setScrollFactor(0.3);
+
+    // 뒤쪽 나무 실루엣
+    for (let i = 0; i < width / 120; i++) {
+      const tx = i * 120 + Math.random() * 40;
+      const th = 200 + Math.random() * 150;
+      treeLine.fillStyle(0x0a0c06);
+      // 뒤틀린 줄기
+      treeLine.fillRect(tx, GAME_HEIGHT - th - 60, 12, th);
+      treeLine.fillRect(tx - 20, GAME_HEIGHT - th - 20, 8, th * 0.4);
+      treeLine.fillRect(tx + 15, GAME_HEIGHT - th, 8, th * 0.3);
+      // 수관
+      treeLine.fillStyle(0x0c1008, 0.8);
+      treeLine.fillCircle(tx + 6, GAME_HEIGHT - th - 70, 40 + Math.random() * 20);
+    }
+    this.backgrounds.push(treeLine);
+
+    // 앞쪽 나무
+    const frontTrees = this.add.graphics();
+    frontTrees.setScrollFactor(0.6);
+    for (let i = 0; i < width / 200; i++) {
+      const tx = i * 200 + Math.random() * 80;
+      const th = 120 + Math.random() * 80;
+      frontTrees.fillStyle(0x15180e);
+      frontTrees.fillRect(tx, GAME_HEIGHT - th - 30, 15, th);
+      // 가지
+      frontTrees.fillStyle(0x121510);
+      frontTrees.fillRect(tx - 25, GAME_HEIGHT - th + 10, 10, 6);
+      frontTrees.fillRect(tx + 20, GAME_HEIGHT - th + 30, 12, 5);
+      // 잎
+      frontTrees.fillStyle(0x1a2010, 0.7);
+      frontTrees.fillCircle(tx + 7, GAME_HEIGHT - th - 35, 30);
+    }
+    this.backgrounds.push(frontTrees);
+
+    // 폐허 돌기둥
+    const ruins = this.add.graphics();
+    ruins.setScrollFactor(0.8);
+    for (let i = 0; i < 4; i++) {
+      const rx = 500 + i * 500;
+      const rh = 40 + Math.random() * 60;
+      ruins.fillStyle(0x282420);
+      ruins.fillRect(rx, this.groundY - rh, 20, rh);
+      ruins.fillRect(rx - 5, this.groundY - rh, 30, 8);
+      // 이끼
+      ruins.fillStyle(0x223315, 0.4);
+      ruins.fillRect(rx, this.groundY - rh + 10, 12, 5);
+    }
+    this.backgrounds.push(ruins);
+  }
+
+  private createBossBackground(width: number): void {
+    // 암흑 신전 - 기둥, 균열 바닥, 보라 오라, 번개
+    const temple = this.add.graphics();
+    temple.setScrollFactor(0.4);
+
+    // 벽면
+    temple.fillStyle(0x0c0818);
+    temple.fillRect(0, 50, width, 500);
+
+    // 거대 기둥들
+    for (let i = 0; i < 6; i++) {
+      const px = 100 + i * 280;
+      temple.fillStyle(0x1a1428);
+      temple.fillRect(px, 100, 40, 450);
+      // 기둥 상단 장식
+      temple.fillStyle(0x221a35);
+      temple.fillRect(px - 10, 90, 60, 20);
+      // 기둥 균열
+      temple.lineStyle(1, 0x332850, 0.5);
+      temple.beginPath();
+      temple.moveTo(px + 20, 150);
+      temple.lineTo(px + 15, 200);
+      temple.lineTo(px + 25, 250);
+      temple.stroke();
+    }
+    this.backgrounds.push(temple);
+
+    // 보라색 오라 광원들
+    for (let i = 0; i < 4; i++) {
+      const glow = this.add.graphics();
+      glow.setPosition(200 + i * 350, 200 + Math.random() * 100);
+      glow.setScrollFactor(0.5);
+      glow.fillStyle(0x440066, 0.15);
+      glow.fillCircle(0, 0, 60);
+      glow.fillStyle(0x660088, 0.1);
+      glow.fillCircle(0, 0, 100);
+      this.backgrounds.push(glow);
+
+      this.tweens.add({
+        targets: glow,
+        alpha: 0.5,
+        duration: 1500 + Math.random() * 1000,
+        yoyo: true,
+        repeat: -1,
+      });
+    }
+
+    // 바닥 균열
+    const cracks = this.add.graphics();
+    cracks.setDepth(-1);
+    cracks.lineStyle(2, 0x440066, 0.4);
+    for (let i = 0; i < 10; i++) {
+      const cx = Math.random() * width;
+      cracks.beginPath();
+      cracks.moveTo(cx, this.groundY);
+      let px = cx, py = this.groundY;
+      for (let s = 0; s < 4; s++) {
+        px += Phaser.Math.Between(-20, 20);
+        py += Phaser.Math.Between(5, 15);
+        cracks.lineTo(px, py);
+      }
+      cracks.stroke();
+    }
+    this.backgrounds.push(cracks);
   }
 
   private createPlatforms(): void {
@@ -213,20 +324,21 @@ export class GameScene extends Phaser.Scene {
     const platform = this.add.graphics();
     platform.setPosition(x, y);
 
-    // 플랫폼 본체
-    platform.fillStyle(0x333344);
+    // 돌 플랫폼
+    platform.fillStyle(0x2a2520);
     platform.fillRect(0, 0, width, 15);
 
-    // 네온 엣지
-    platform.lineStyle(2, 0x00ffff, 0.6);
+    // 상단 이끼
+    platform.lineStyle(2, 0x223315, 0.5);
     platform.beginPath();
     platform.moveTo(0, 0);
     platform.lineTo(width, 0);
     platform.stroke();
 
-    // 글로우
-    platform.fillStyle(0x00ffff, 0.1);
-    platform.fillRect(0, -5, width, 5);
+    // 돌 질감
+    platform.fillStyle(0x1a1810, 0.3);
+    platform.fillRect(5, 3, width * 0.3, 4);
+    platform.fillRect(width * 0.5, 3, width * 0.25, 4);
 
     platform.setDepth(y);
 
@@ -269,11 +381,28 @@ export class GameScene extends Phaser.Scene {
     this.events.on('curseHit', this.handleCurseHit, this);
     this.events.on('soulDrainHit', this.handleSoulDrainHit, this);
     this.events.on('deathWaveHit', this.handleDeathWaveHit, this);
+    this.events.on('darkSpikeHit', this.handleBoneSpikeHit, this); // same rect hit logic
+    this.events.on('darkMeteorHit', this.handleCorpseBombHit, this); // same circle hit logic
 
     // 보스 처치
     this.events.on('bossDefeated', (rewards: any) => {
       this.player.gainExp(rewards.exp);
       this.player.gainGold(rewards.gold);
+    });
+
+    // 플레이어 사망 → 2초 후 마을 부활
+    this.events.on('playerDied', () => {
+      this.time.delayedCall(2000, () => {
+        // 마을로 전환
+        if (this.currentMap !== MapType.VILLAGE) {
+          this.transitionToMap(MapType.VILLAGE);
+          this.time.delayedCall(600, () => {
+            this.player.respawn(150, this.groundY - 50);
+          });
+        } else {
+          this.player.respawn(150, this.groundY - 50);
+        }
+      });
     });
   }
 
@@ -553,52 +682,60 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createAmbientEffects(): void {
-    // 빗방울 효과
+    // 안개/먼지 파티클
     this.time.addEvent({
-      delay: 50,
+      delay: 200,
       loop: true,
       callback: () => {
-        if (Math.random() > 0.7) {
-          const rain = this.add.graphics();
-          rain.setPosition(
+        if (Math.random() > 0.5) {
+          const fog = this.add.graphics();
+          fog.setPosition(
             this.cameras.main.scrollX + Math.random() * GAME_WIDTH,
-            0
+            this.groundY - 20 - Math.random() * 60
           );
-          rain.lineStyle(1, 0x6688aa, 0.3);
-          rain.beginPath();
-          rain.moveTo(0, 0);
-          rain.lineTo(5, 30);
-          rain.stroke();
-          rain.setDepth(-1);
+          fog.fillStyle(0x888888, 0.08);
+          fog.fillCircle(0, 0, 20 + Math.random() * 30);
+          fog.setDepth(-1);
 
           this.tweens.add({
-            targets: rain,
-            y: GAME_HEIGHT,
-            x: rain.x + 20,
-            duration: 800,
-            onComplete: () => rain.destroy(),
+            targets: fog,
+            x: fog.x + 40 + Math.random() * 30,
+            alpha: 0,
+            duration: 2000 + Math.random() * 1000,
+            onComplete: () => fog.destroy(),
           });
         }
       },
     });
 
-    // 네온 반짝임
-    this.time.addEvent({
-      delay: 2000,
-      loop: true,
-      callback: () => {
-        if (this.neonLights.length > 0) {
-          const light = this.neonLights[Math.floor(Math.random() * this.neonLights.length)];
+    // 도깨비불 (필드맵) / 보라 파티클 (보스맵)
+    if (this.currentMap === MapType.FIELD || this.currentMap === MapType.BOSS) {
+      this.time.addEvent({
+        delay: 1500,
+        loop: true,
+        callback: () => {
+          const orb = this.add.graphics();
+          const ox = this.cameras.main.scrollX + Math.random() * GAME_WIDTH;
+          const oy = 200 + Math.random() * 300;
+          orb.setPosition(ox, oy);
+          const color = this.currentMap === MapType.FIELD ? 0x44ff88 : 0x8844ff;
+          orb.fillStyle(color, 0.4);
+          orb.fillCircle(0, 0, 4);
+          orb.fillStyle(color, 0.15);
+          orb.fillCircle(0, 0, 10);
+          orb.setDepth(0);
+
           this.tweens.add({
-            targets: light,
-            alpha: 0.3,
-            duration: 100,
-            yoyo: true,
-            repeat: 2,
+            targets: orb,
+            y: oy - 40,
+            x: ox + Phaser.Math.Between(-30, 30),
+            alpha: 0,
+            duration: 2500,
+            onComplete: () => orb.destroy(),
           });
-        }
-      },
-    });
+        },
+      });
+    }
   }
 
   private checkPortalCollision(): void {
@@ -699,7 +836,7 @@ export class GameScene extends Phaser.Scene {
     // 몬스터 업데이트
     for (const monster of this.monsters) {
       if (!monster.isDead) {
-        monster.update(time, delta, this.summons);
+        monster.update(time, delta);
 
         // 플레이어 충돌
         const mHitbox = monster.getHitbox();
@@ -718,7 +855,7 @@ export class GameScene extends Phaser.Scene {
 
     // 보스 업데이트
     if (this.boss && !this.boss.isDead) {
-      this.boss.update(time, delta, this.groundY, this.summons);
+      this.boss.update(time, delta, this.groundY);
     }
 
     // 투사체 업데이트
@@ -762,22 +899,6 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 소환수 업데이트
-    const enemies: any[] = [...this.monsters];
-    if (this.boss && !this.boss.isDead) enemies.push(this.boss);
-
-    for (let i = this.summons.length - 1; i >= 0; i--) {
-      const summon = this.summons[i];
-      if (summon.isAlive) {
-        summon.update(time, delta, this.groundY, enemies);
-      } else {
-        this.summons.splice(i, 1);
-      }
-    }
-
-    // 죽은 소환수 정리
-    this.player.minionGhouls = this.player.minionGhouls.filter((s: any) => s.isAlive);
-
     // 포탈 충돌
     this.checkPortalCollision();
 
@@ -812,9 +933,9 @@ export class GameScene extends Phaser.Scene {
       this.player.castFireball();
     }
 
-    // Q - 구울 소환
+    // Q - 다크 스파이크
     if (Phaser.Input.Keyboard.JustDown(this.keys.q)) {
-      this.player.summonGhoulMinion();
+      this.player.castDarkSpike();
     }
 
     // W - 뼈가시
@@ -827,9 +948,9 @@ export class GameScene extends Phaser.Scene {
       this.player.castCorpseBomb();
     }
 
-    // R - 거대 구울
+    // R - 다크 메테오
     if (Phaser.Input.Keyboard.JustDown(this.keys.r)) {
-      this.player.summonGiantGhoul();
+      this.player.castDarkMeteor();
     }
 
     // A - 암흑 보호막
