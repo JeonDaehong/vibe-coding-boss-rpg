@@ -33,6 +33,11 @@ export enum MapType {
   VILLAGE = 'village',
   FIELD = 'field',
   BOSS = 'boss',
+  TOWER_1 = 'tower_1',
+  TOWER_2 = 'tower_2',
+  TOWER_3 = 'tower_3',
+  TOWER_4 = 'tower_4',
+  TOWER_5 = 'tower_5',
 }
 
 // 맵 설정
@@ -43,7 +48,7 @@ export const MAP_CONFIG = {
     groundY: 580,
     hasMonsters: false,
     hasBoss: false,
-    nextMap: MapType.FIELD,
+    nextMap: MapType.TOWER_1,
     portalX: 1500,
     ambientColor: 0x0a0812,
   },
@@ -66,6 +71,85 @@ export const MAP_CONFIG = {
     nextMap: null,
     portalX: null,
     ambientColor: 0x0a0410,
+  },
+  [MapType.TOWER_1]: {
+    name: '마탑 1층 - 시련의 방',
+    width: 1400,
+    groundY: 580,
+    hasMonsters: false,
+    hasBoss: false,
+    nextMap: MapType.TOWER_2,
+    portalX: null,
+    ambientColor: 0x0a0515,
+  },
+  [MapType.TOWER_2]: {
+    name: '마탑 2층 - 수정의 방',
+    width: 1800,
+    groundY: 580,
+    hasMonsters: false,
+    hasBoss: false,
+    nextMap: MapType.TOWER_3,
+    portalX: null,
+    ambientColor: 0x050a15,
+  },
+  [MapType.TOWER_3]: {
+    name: '마탑 3층 - 쌍둥이의 방',
+    width: 1600,
+    groundY: 580,
+    hasMonsters: false,
+    hasBoss: false,
+    nextMap: MapType.TOWER_4,
+    portalX: null,
+    ambientColor: 0x100510,
+  },
+  [MapType.TOWER_4]: {
+    name: '마탑 4층 - 지혜의 방',
+    width: 1400,
+    groundY: 580,
+    hasMonsters: false,
+    hasBoss: false,
+    nextMap: MapType.TOWER_5,
+    portalX: null,
+    ambientColor: 0x051010,
+  },
+  [MapType.TOWER_5]: {
+    name: '마탑 5층 - 암흑의 정점',
+    width: 1600,
+    groundY: 580,
+    hasMonsters: false,
+    hasBoss: true,
+    nextMap: null,
+    portalX: null,
+    ambientColor: 0x0a0510,
+  },
+};
+
+// 탑 층별 설정
+export const TOWER_CONFIG = {
+  [MapType.TOWER_1]: {
+    floorType: 'wave',
+    duration: 180000,
+    waveInterval: 15000,
+    enemiesPerWave: 5,
+    totalWaves: 12,
+  },
+  [MapType.TOWER_2]: {
+    floorType: 'crystal',
+    crystalCount: 3,
+    projectileInterval: 3000,
+    projectileDamage: 10,
+  },
+  [MapType.TOWER_3]: {
+    floorType: 'miniboss',
+    reviveTimer: 20000,
+  },
+  [MapType.TOWER_4]: {
+    floorType: 'puzzle',
+    timeLimit: 120000,
+    sequenceLength: 5,
+  },
+  [MapType.TOWER_5]: {
+    floorType: 'boss',
   },
 };
 
@@ -120,6 +204,41 @@ export const BOSS_CONFIG = {
       { healthPercent: 0.3, attackSpeed: 1.8, moveSpeed: 60 },
     ],
   },
+};
+
+// 미니보스 설정 (3층)
+export const MINI_BOSS_CONFIG = {
+  SHADOW_TWIN_A: {
+    name: '그림자 쌍둥이 - 알파',
+    health: 800,
+    attack: 35,
+    defense: 8,
+    exp: 200,
+    gold: 150,
+    color: 0x442266,
+    size: { width: 60, height: 80 },
+    attackPatterns: ['slash', 'dash', 'projectile'],
+  },
+  SHADOW_TWIN_B: {
+    name: '그림자 쌍둥이 - 베타',
+    health: 800,
+    attack: 35,
+    defense: 8,
+    exp: 200,
+    gold: 150,
+    color: 0x662244,
+    size: { width: 60, height: 80 },
+    attackPatterns: ['slam', 'spin', 'summon'],
+  },
+};
+
+// 수정탑 설정 (2층)
+export const CRYSTAL_TOWER_CONFIG = {
+  health: 200,
+  color: 0x44aaff,
+  projectileDamage: 20,
+  projectileSpeed: 300,
+  size: { width: 40, height: 100 },
 };
 
 // 스킬 타입

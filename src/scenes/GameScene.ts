@@ -1,8 +1,12 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT, MAP_CONFIG, MapType, MONSTER_TYPES, KEY_CONFIG } from '../config/GameConfig';
+import { GAME_WIDTH, GAME_HEIGHT, MAP_CONFIG, MapType, MONSTER_TYPES, KEY_CONFIG, TOWER_CONFIG } from '../config/GameConfig';
 import { Player } from '../entities/Player';
 import { Monster } from '../entities/Monster';
 import { TrollKing } from '../entities/TrollKing';
+import { CrystalTower } from '../entities/CrystalTower';
+import { MiniBoss } from '../entities/MiniBoss';
+import { PuzzleSystem } from '../systems/PuzzleSystem';
+import { SoundManager } from '../utils/SoundManager';
 
 export class GameScene extends Phaser.Scene {
   public player!: Player;
@@ -30,8 +34,32 @@ export class GameScene extends Phaser.Scene {
   // NPC
   private npc: Phaser.GameObjects.Container | null = null;
 
+  // 탑 시스템
+  private crystalTowers: CrystalTower[] = [];
+  private miniBosses: MiniBoss[] = [];
+  private puzzleSystem: PuzzleSystem | null = null;
+  private soundManager: SoundManager;
+  private towerFloorUI: Phaser.GameObjects.Container | null = null;
+  private floorTimerText: Phaser.GameObjects.Text | null = null;
+  private floorObjectiveText: Phaser.GameObjects.Text | null = null;
+
+  // 1층 상태
+  private waveTimer: number = 0;
+  private currentWave: number = 0;
+  private waveKillCount: number = 0;
+  private totalWaveKills: number = 0;
+  private floor1Active: boolean = false;
+
+  // 3층 상태
+  private firstBossKilledTime: number = 0;
+  private reviveTimerActive: boolean = false;
+
+  // 층 클리어 상태
+  private floorCleared: boolean = false;
+
   constructor() {
     super({ key: 'GameScene' });
+    this.soundManager = new SoundManager();
   }
 
   preload(): void {
@@ -756,27 +784,7 @@ export class GameScene extends Phaser.Scene {
 
     this.time.delayedCall(500, () => {
       // 현재 맵 정리
-      this.monsters.forEach(m => m.destroy());
-      this.monsters = [];
-      if (this.boss) {
-        this.boss.destroy();
-        this.boss = null;
-      }
-      this.backgrounds.forEach(b => b.destroy());
-      this.backgrounds = [];
-      this.neonLights.forEach(n => n.destroy());
-      this.neonLights = [];
-      if (this.portal) {
-        this.portal.destroy();
-        this.portal = null;
-      }
-      if (this.npc) {
-        this.npc.destroy();
-        this.npc = null;
-      }
-
-      // 플랫폼 정리
-      this.platforms = [];
+      this.cleanupCurrentMap();
 
       // 새 맵 설정
       this.currentMap = nextMap;
@@ -786,12 +794,17 @@ export class GameScene extends Phaser.Scene {
       // 새 맵 생성
       this.createBackground();
       this.createPlatforms();
-      this.createPortal();
 
-      if (nextMap === MapType.BOSS) {
-        this.spawnBoss();
+      // 타워 맵인지 체크
+      if (this.isTowerMap(nextMap)) {
+        this.initTowerFloor(nextMap);
       } else {
-        this.spawnMonsters();
+        this.createPortal();
+        if (nextMap === MapType.BOSS) {
+          this.spawnBoss();
+        } else {
+          this.spawnMonsters();
+        }
       }
 
       // 플레이어 위치 리셋
@@ -891,6 +904,19 @@ export class GameScene extends Phaser.Scene {
             this.projectiles.splice(i, 1);
           }
         }
+
+        // 수정탑 충돌 (2층)
+        for (const crystal of this.crystalTowers) {
+          if (crystal.isDead || !this.projectiles[i]) continue;
+          const cHitbox = crystal.getHitbox();
+          if (Phaser.Geom.Intersects.RectangleToRectangle(projHitbox, cHitbox)) {
+            crystal.takeDamage(proj.damage);
+            this.player.addCombo();
+            if (proj.destroy) proj.destroy();
+            this.projectiles.splice(i, 1);
+            break;
+          }
+        }
       }
 
       // 비활성 투사체 정리
@@ -904,6 +930,31 @@ export class GameScene extends Phaser.Scene {
 
     // 죽은 몬스터 정리
     this.monsters = this.monsters.filter(m => !m.isDead || m.active);
+
+    // 타워 층별 업데이트
+    if (this.isTowerMap(this.currentMap)) {
+      switch (this.currentMap) {
+        case MapType.TOWER_1:
+          this.updateFloor1(time, delta);
+          break;
+        case MapType.TOWER_2:
+          this.updateFloor2(time, delta);
+          break;
+        case MapType.TOWER_3:
+          this.updateFloor3(time, delta);
+          break;
+        case MapType.TOWER_4:
+          this.updateFloor4(time, delta);
+          break;
+      }
+    }
+
+    // 몬스터 사망 이벤트 (1층용)
+    for (const monster of this.monsters) {
+      if (monster.isDead && this.floor1Active) {
+        this.events.emit('monsterKilled');
+      }
+    }
   }
 
   private handleInput(): void {
@@ -972,5 +1023,528 @@ export class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keys.f)) {
       this.player.castDeathWave();
     }
+
+    // 4층 퍼즐 - 기둥 활성화
+    if (this.puzzleSystem && this.puzzleSystem.isWaitingForInput()) {
+      if (Phaser.Input.Keyboard.JustDown(this.keys.up) || Phaser.Input.Keyboard.JustDown(this.keys.space)) {
+        const pillarIndex = this.puzzleSystem.checkPlayerNearPillar(this.player.x, this.player.y);
+        if (pillarIndex >= 0) {
+          this.puzzleSystem.activatePillar(pillarIndex);
+        }
+      }
+    }
+  }
+
+  // === 탑 시스템 ===
+
+  private cleanupCurrentMap(): void {
+    this.monsters.forEach(m => m.destroy());
+    this.monsters = [];
+    if (this.boss) {
+      this.boss.destroy();
+      this.boss = null;
+    }
+    this.backgrounds.forEach(b => b.destroy());
+    this.backgrounds = [];
+    this.neonLights.forEach(n => n.destroy());
+    this.neonLights = [];
+    if (this.portal) {
+      this.portal.destroy();
+      this.portal = null;
+    }
+    if (this.npc) {
+      this.npc.destroy();
+      this.npc = null;
+    }
+    this.platforms = [];
+
+    // 탑 관련 정리
+    this.crystalTowers.forEach(c => c.destroy());
+    this.crystalTowers = [];
+    this.miniBosses.forEach(m => m.destroy());
+    this.miniBosses = [];
+    if (this.puzzleSystem) {
+      this.puzzleSystem = null;
+    }
+    if (this.towerFloorUI) {
+      this.towerFloorUI.destroy();
+      this.towerFloorUI = null;
+    }
+    this.floor1Active = false;
+    this.reviveTimerActive = false;
+    this.floorCleared = false;
+  }
+
+  private isTowerMap(map: MapType): boolean {
+    return map === MapType.TOWER_1 || map === MapType.TOWER_2 ||
+           map === MapType.TOWER_3 || map === MapType.TOWER_4 || map === MapType.TOWER_5;
+  }
+
+  private initTowerFloor(floor: MapType): void {
+    this.floorCleared = false;
+    this.createTowerBackground();
+    this.createTowerFloorUI();
+
+    switch (floor) {
+      case MapType.TOWER_1:
+        this.startFloor1();
+        break;
+      case MapType.TOWER_2:
+        this.startFloor2();
+        break;
+      case MapType.TOWER_3:
+        this.startFloor3();
+        break;
+      case MapType.TOWER_4:
+        this.startFloor4();
+        break;
+      case MapType.TOWER_5:
+        this.startFloor5();
+        break;
+    }
+  }
+
+  private createTowerBackground(): void {
+    const width = this.mapConfig.width;
+
+    // 탑 내부 배경
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(0x0a0515, 0x0a0515, 0x050208, 0x050208);
+    bg.fillRect(0, 0, width, GAME_HEIGHT);
+    bg.setScrollFactor(0.1);
+    this.backgrounds.push(bg);
+
+    // 돌벽
+    for (let i = 0; i < width / 100; i++) {
+      const wall = this.add.graphics();
+      wall.setPosition(i * 100, 0);
+      wall.fillStyle(0x1a1520, 1);
+      wall.fillRect(0, 0, 100, GAME_HEIGHT);
+      wall.lineStyle(1, 0x2a2530, 0.5);
+      // 벽돌 패턴
+      for (let j = 0; j < 15; j++) {
+        const offset = j % 2 === 0 ? 0 : 50;
+        wall.strokeRect(offset, j * 50, 100, 50);
+      }
+      wall.setScrollFactor(0.3);
+      this.backgrounds.push(wall);
+    }
+
+    // 횃불
+    for (let i = 0; i < width / 300; i++) {
+      const torch = this.add.graphics();
+      torch.setPosition(100 + i * 300, 200);
+
+      // 받침
+      torch.fillStyle(0x442200, 1);
+      torch.fillRect(-5, 0, 10, 30);
+
+      // 불꽃
+      torch.fillStyle(0xff6600, 0.8);
+      torch.fillEllipse(0, -10, 20, 30);
+      torch.fillStyle(0xffff00, 0.6);
+      torch.fillEllipse(0, -15, 10, 15);
+
+      torch.setScrollFactor(0.5);
+      this.backgrounds.push(torch);
+
+      // 불꽃 애니메이션
+      this.tweens.add({
+        targets: torch,
+        scaleY: 1.1,
+        scaleX: 0.95,
+        duration: 200,
+        yoyo: true,
+        repeat: -1,
+      });
+    }
+
+    // 바닥 - 돌 바닥
+    const ground = this.add.graphics();
+    ground.fillStyle(0x222228, 1);
+    ground.fillRect(0, this.groundY, width, GAME_HEIGHT - this.groundY);
+    ground.lineStyle(2, 0x333340);
+    for (let i = 0; i < width / 60; i++) {
+      ground.strokeRect(i * 60, this.groundY, 60, 20);
+    }
+    this.backgrounds.push(ground);
+  }
+
+  private createTowerFloorUI(): void {
+    this.towerFloorUI = this.add.container(0, 0);
+    this.towerFloorUI.setScrollFactor(0);
+    this.towerFloorUI.setDepth(1000);
+
+    // 층 이름
+    const floorName = this.add.text(GAME_WIDTH / 2, 30, this.mapConfig.name, {
+      fontSize: '24px',
+      color: '#aa44ff',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5);
+    this.towerFloorUI.add(floorName);
+
+    // 타이머
+    this.floorTimerText = this.add.text(GAME_WIDTH - 120, 30, '', {
+      fontSize: '28px',
+      color: '#ffaa00',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5);
+    this.towerFloorUI.add(this.floorTimerText);
+
+    // 목표
+    this.floorObjectiveText = this.add.text(GAME_WIDTH / 2, 60, '', {
+      fontSize: '16px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5);
+    this.towerFloorUI.add(this.floorObjectiveText);
+  }
+
+  // === 1층: 웨이브 서바이벌 ===
+  private startFloor1(): void {
+    this.floor1Active = true;
+    this.totalWaveKills = 0;
+    this.waveTimer = (TOWER_CONFIG[MapType.TOWER_1] as any).duration;
+
+    this.floorObjectiveText?.setText('3분 동안 살아남으세요!');
+
+    // 초기 몬스터 스폰
+    this.spawnFloor1Monster();
+    this.spawnFloor1Monster();
+    this.spawnFloor1Monster();
+
+    // 끊임없이 몬스터 스폰 (1.5초마다)
+    this.time.addEvent({
+      delay: 1500,
+      callback: () => {
+        if (this.floor1Active && !this.floorCleared) {
+          // 현재 살아있는 몬스터가 8마리 미만이면 스폰
+          const aliveMonsters = this.monsters.filter(m => !m.isDead).length;
+          if (aliveMonsters < 8) {
+            this.spawnFloor1Monster();
+          }
+        }
+      },
+      loop: true,
+    });
+
+    // 이벤트 리스너
+    this.events.on('monsterKilled', this.onFloor1MonsterKilled, this);
+  }
+
+  private spawnFloor1Monster(): void {
+    const monsterKeys = Object.keys(MONSTER_TYPES);
+    const typeKey = monsterKeys[Math.floor(Math.random() * monsterKeys.length)];
+    const config = (MONSTER_TYPES as any)[typeKey];
+
+    // 화면 밖에서 스폰
+    const side = Math.random() > 0.5 ? 1 : -1;
+    const spawnX = side > 0 ? this.mapConfig.width + 50 : -50;
+    const spawnY = this.groundY - 30;
+
+    const monster = new Monster(this, spawnX, spawnY, config);
+    this.monsters.push(monster);
+
+    // 입장 애니메이션
+    this.tweens.add({
+      targets: monster,
+      x: side > 0 ? this.mapConfig.width - 100 : 100,
+      duration: 500,
+      ease: 'Quad.easeOut',
+    });
+  }
+
+  private onFloor1MonsterKilled(): void {
+    this.totalWaveKills++;
+    this.floorObjectiveText?.setText(`처치: ${this.totalWaveKills}`);
+  }
+
+  private updateFloor1(time: number, delta: number): void {
+    if (!this.floor1Active || this.floorCleared) return;
+
+    this.waveTimer -= delta;
+    const seconds = Math.ceil(this.waveTimer / 1000);
+    this.floorTimerText?.setText(`${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`);
+
+    if (this.waveTimer <= 0) {
+      this.floor1Active = false;
+      // 시간 종료 - 클리어!
+      this.floorObjectiveText?.setText(`클리어! 총 ${this.totalWaveKills}마리 처치!`);
+      this.time.delayedCall(1500, () => {
+        this.completeFloor();
+      });
+    }
+  }
+
+  // === 2층: 수정탑 파괴 ===
+  private startFloor2(): void {
+    const crystalCount = (TOWER_CONFIG[MapType.TOWER_2] as any).crystalCount;
+    const spacing = (this.mapConfig.width - 200) / (crystalCount + 1);
+
+    for (let i = 0; i < crystalCount; i++) {
+      const x = 100 + (i + 1) * spacing;
+      const crystal = new CrystalTower(this, x, this.groundY);
+      this.crystalTowers.push(crystal);
+    }
+
+    this.floorObjectiveText?.setText(`수정탑: 0 / ${crystalCount}`);
+
+    // 수정 파괴 이벤트
+    this.events.on('crystalDestroyed', this.onCrystalDestroyed, this);
+
+    // 투사체 피격 이벤트
+    this.events.on('crystalProjectileHit', (damage: number) => {
+      this.player.takeDamage(damage, this.time.now);
+    });
+  }
+
+  private onCrystalDestroyed(): void {
+    const destroyed = this.crystalTowers.filter(c => c.isDead).length;
+    const total = this.crystalTowers.length;
+    this.floorObjectiveText?.setText(`수정탑: ${destroyed} / ${total}`);
+
+    if (destroyed >= total) {
+      this.completeFloor();
+    }
+  }
+
+  private updateFloor2(time: number, delta: number): void {
+    // 수정탑 업데이트
+    for (const crystal of this.crystalTowers) {
+      if (!crystal.isDead) {
+        crystal.update(time, delta, this.player.x, this.player.y);
+      }
+    }
+  }
+
+  // === 3층: 쌍둥이 보스 ===
+  private startFloor3(): void {
+    const bossA = new MiniBoss(this, 400, this.groundY, 'SHADOW_TWIN_A');
+    const bossB = new MiniBoss(this, this.mapConfig.width - 400, this.groundY, 'SHADOW_TWIN_B');
+
+    bossA.setTarget(this.player);
+    bossB.setTarget(this.player);
+    bossA.setSibling(bossB);
+    bossB.setSibling(bossA);
+
+    this.miniBosses.push(bossA, bossB);
+
+    this.floorObjectiveText?.setText('쌍둥이를 처치하세요!');
+
+    // 미니보스 이벤트
+    this.events.on('miniBossKilled', this.onMiniBossKilled, this);
+    this.events.on('miniBossRevived', this.onMiniBossRevived, this);
+    this.events.on('miniBossAttackHit', (damage: number) => {
+      this.player.takeDamage(damage, this.time.now);
+    });
+  }
+
+  private onMiniBossKilled(boss: MiniBoss): void {
+    const aliveCount = this.miniBosses.filter(m => !m.isDead).length;
+
+    if (aliveCount === 0) {
+      // 둘 다 죽음 - 클리어
+      this.completeFloor();
+    } else {
+      // 첫 번째만 죽음 - 부활 타이머 시작
+      this.firstBossKilledTime = this.time.now;
+      this.reviveTimerActive = true;
+      this.soundManager.playReviveWarning();
+
+      const reviveTime = (TOWER_CONFIG[MapType.TOWER_3] as any).reviveTimer / 1000;
+      this.floorObjectiveText?.setText(`${reviveTime}초 안에 나머지를 처치하세요!`);
+    }
+  }
+
+  private onMiniBossRevived(boss: MiniBoss): void {
+    this.reviveTimerActive = false;
+    this.floorObjectiveText?.setText('쌍둥이를 처치하세요!');
+  }
+
+  private updateFloor3(time: number, delta: number): void {
+    // 미니보스 업데이트
+    for (const boss of this.miniBosses) {
+      boss.update(time, delta, this.groundY);
+    }
+
+    // 부활 타이머 체크
+    if (this.reviveTimerActive) {
+      const elapsed = time - this.firstBossKilledTime;
+      const reviveTime = (TOWER_CONFIG[MapType.TOWER_3] as any).reviveTimer;
+      const remaining = Math.ceil((reviveTime - elapsed) / 1000);
+
+      this.floorTimerText?.setText(`${remaining}초`);
+
+      if (elapsed >= reviveTime) {
+        // 부활!
+        const deadBoss = this.miniBosses.find(m => m.isDead && !m.isReviving);
+        if (deadBoss) {
+          deadBoss.startRevive();
+        }
+        this.reviveTimerActive = false;
+      }
+    }
+
+    // 투사체 충돌 체크 (미니보스)
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const proj = this.projectiles[i];
+      if (!proj.getHitbox) continue;
+
+      const projHitbox = proj.getHitbox();
+
+      for (const boss of this.miniBosses) {
+        if (boss.isDead) continue;
+        const bHitbox = boss.getHitbox();
+        if (Phaser.Geom.Intersects.RectangleToRectangle(projHitbox, bHitbox)) {
+          const dir = boss.x > proj.graphics.x ? 1 : -1;
+          boss.takeDamage(proj.damage, dir, time);
+          this.player.addCombo();
+          if (proj.destroy) proj.destroy();
+          this.projectiles.splice(i, 1);
+          break;
+        }
+      }
+    }
+  }
+
+  // === 4층: 퍼즐 ===
+  private startFloor4(): void {
+    const timeLimit = (TOWER_CONFIG[MapType.TOWER_4] as any).timeLimit;
+
+    this.puzzleSystem = new PuzzleSystem(
+      this,
+      this.groundY,
+      timeLimit,
+      () => this.completeFloor(),
+      () => this.failFloor('시간 초과!')
+    );
+
+    this.puzzleSystem.start();
+    this.floorObjectiveText?.setText('룬의 순서를 맞추세요!');
+  }
+
+  private updateFloor4(time: number, delta: number): void {
+    if (this.puzzleSystem && this.puzzleSystem.isActive()) {
+      this.puzzleSystem.update(delta);
+
+      const remaining = Math.ceil(this.puzzleSystem.getTimeRemaining() / 1000);
+      this.floorTimerText?.setText(`${remaining}초`);
+    }
+  }
+
+  // === 5층: 보스 ===
+  private startFloor5(): void {
+    this.spawnBoss();
+    this.floorObjectiveText?.setText('암흑군주를 물리치세요!');
+
+    // 보스 사망 이벤트
+    this.events.on('bossDefeated', () => {
+      this.completeFloor();
+    });
+  }
+
+  // === 층 완료/실패 ===
+  private completeFloor(): void {
+    if (this.floorCleared) return;
+    this.floorCleared = true;
+
+    this.soundManager.playFloorComplete();
+
+    const completeText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, '클리어!', {
+      fontSize: '64px',
+      color: '#44ff44',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 8,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
+
+    this.tweens.add({
+      targets: completeText,
+      scaleX: 1.2,
+      scaleY: 1.2,
+      duration: 500,
+      yoyo: true,
+    });
+
+    // 다음 층으로 이동 또는 완료
+    this.time.delayedCall(2500, () => {
+      completeText.destroy();
+      if (this.mapConfig.nextMap) {
+        this.transitionToMap(this.mapConfig.nextMap);
+      } else {
+        // 탑 클리어!
+        this.showTowerComplete();
+      }
+    });
+  }
+
+  private failFloor(reason: string): void {
+    const failText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, reason, {
+      fontSize: '48px',
+      color: '#ff4444',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 6,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(1002);
+
+    this.time.delayedCall(2000, () => {
+      failText.destroy();
+      // 마을로 돌아가기
+      this.transitionToMap(MapType.VILLAGE);
+    });
+  }
+
+  private showTowerComplete(): void {
+    const bg = this.add.graphics();
+    bg.fillStyle(0x000000, 0.8);
+    bg.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    bg.setScrollFactor(0).setDepth(1003);
+
+    const title = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50, '마탑 정복!', {
+      fontSize: '72px',
+      color: '#ffd700',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 8,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(1004);
+
+    const sub = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 30, '축하합니다!', {
+      fontSize: '32px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(1004);
+
+    // 파티클
+    for (let i = 0; i < 30; i++) {
+      const particle = this.add.graphics();
+      particle.setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2);
+      particle.fillStyle(Phaser.Display.Color.RandomRGB().color, 1);
+      particle.fillCircle(0, 0, 5);
+      particle.setScrollFactor(0).setDepth(1005);
+
+      const angle = (i / 30) * Math.PI * 2;
+      this.tweens.add({
+        targets: particle,
+        x: GAME_WIDTH / 2 + Math.cos(angle) * 300,
+        y: GAME_HEIGHT / 2 + Math.sin(angle) * 200,
+        alpha: 0,
+        duration: 2000,
+        delay: i * 50,
+        onComplete: () => particle.destroy(),
+      });
+    }
+
+    this.time.delayedCall(4000, () => {
+      bg.destroy();
+      title.destroy();
+      sub.destroy();
+      this.transitionToMap(MapType.VILLAGE);
+    });
   }
 }

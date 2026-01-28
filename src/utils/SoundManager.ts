@@ -185,4 +185,78 @@ export class SoundManager {
   playJump(): void {
     this.playTone(250, 0.1, 'sine', 0.06);
   }
+
+  // 수정탑 파괴
+  playCrystalBreak(): void {
+    this.playTone(800, 0.15, 'sine', 0.12);
+    this.playTone(600, 0.2, 'triangle', 0.1);
+    this.playTone(400, 0.25, 'sine', 0.08);
+    this.playNoise(0.15, 0.1);
+  }
+
+  // 수정 투사체 발사
+  playCrystalProjectile(): void {
+    this.playTone(600, 0.1, 'sine', 0.06);
+    this.playTone(800, 0.08, 'triangle', 0.05);
+  }
+
+  // 룬 활성화
+  playRuneActivate(): void {
+    this.playTone(440, 0.15, 'sine', 0.1);
+    this.playTone(550, 0.12, 'sine', 0.08);
+  }
+
+  // 퍼즐 성공
+  playPuzzleSuccess(): void {
+    this.playTone(523, 0.12, 'sine', 0.1);
+    setTimeout(() => this.playTone(659, 0.12, 'sine', 0.1), 100);
+    setTimeout(() => this.playTone(784, 0.15, 'sine', 0.12), 200);
+    setTimeout(() => this.playTone(1047, 0.2, 'sine', 0.1), 300);
+  }
+
+  // 퍼즐 실패
+  playPuzzleFail(): void {
+    this.playTone(200, 0.25, 'sawtooth', 0.1);
+    this.playTone(150, 0.3, 'sawtooth', 0.08);
+  }
+
+  // 층 클리어
+  playFloorComplete(): void {
+    this.playTone(523, 0.15, 'sine', 0.12);
+    setTimeout(() => this.playTone(659, 0.15, 'sine', 0.12), 120);
+    setTimeout(() => this.playTone(784, 0.2, 'sine', 0.12), 240);
+    setTimeout(() => this.playTone(1047, 0.3, 'sine', 0.15), 360);
+  }
+
+  // 웨이브 경고
+  playWaveWarning(): void {
+    this.playTone(300, 0.3, 'square', 0.08);
+    setTimeout(() => this.playTone(350, 0.3, 'square', 0.08), 200);
+  }
+
+  // 부활 경고
+  playReviveWarning(): void {
+    this.playTone(150, 0.6, 'sawtooth', 0.1);
+    this.playTone(180, 0.5, 'sine', 0.08);
+  }
+
+  // 공격 음성 (이얍!)
+  playAttackVoice(): void {
+    // 빠른 상승음으로 "야!" 느낌
+    this.playTone(350, 0.08, 'sine', 0.12);
+    this.playTone(500, 0.06, 'sine', 0.1);
+  }
+
+  // 스킬 음성 (햡!)
+  playSkillVoice(): void {
+    // 짧고 강한 "햡" 느낌
+    this.playTone(400, 0.1, 'sine', 0.1);
+    this.playTone(300, 0.08, 'triangle', 0.08);
+  }
+
+  // 피격 음성 (윽!)
+  playHitVoice(): void {
+    this.playTone(280, 0.12, 'sine', 0.1);
+    this.playTone(200, 0.15, 'sine', 0.08);
+  }
 }

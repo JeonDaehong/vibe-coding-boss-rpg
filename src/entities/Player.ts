@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { PHYSICS, PLAYER_STATS, LEVEL_CONFIG, SKILL_TYPES } from '../config/GameConfig';
+import { SoundManager } from '../utils/SoundManager';
 
 export class Player extends Phaser.GameObjects.Container {
   public scene: Phaser.Scene;
@@ -63,6 +64,9 @@ export class Player extends Phaser.GameObjects.Container {
   // 히트박스
   public hitbox = { width: 40, height: 60 };
 
+  // 사운드
+  private soundManager: SoundManager;
+
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y);
     this.scene = scene;
@@ -79,6 +83,9 @@ export class Player extends Phaser.GameObjects.Container {
       this.skillCooldowns.set(skill, 0);
       this.lastSkillTime.set(skill, -100000);
     }
+
+    // 사운드 매니저 초기화
+    this.soundManager = new SoundManager();
 
     this.createSprite();
     scene.add.existing(this);
@@ -256,6 +263,7 @@ export class Player extends Phaser.GameObjects.Container {
     this.isDashing = true;
     this.dashCooldown = this.DASH_COOLDOWN;
     this.facingRight = direction > 0;
+    this.soundManager.playDash();
 
     const startX = this.x;
     const endX = this.x + direction * this.DASH_DISTANCE;
@@ -360,10 +368,12 @@ export class Player extends Phaser.GameObjects.Container {
       this.velocityY = -PHYSICS.playerJumpPower;
       this.isOnGround = false;
       this.canDoubleJump = true;
+      this.soundManager.playJump();
       this.createJumpEffect();
     } else if (this.canDoubleJump) {
       this.velocityY = -PHYSICS.doubleJumpPower;
       this.canDoubleJump = false;
+      this.soundManager.playJump();
       this.createDoubleJumpEffect();
     }
   }
@@ -458,6 +468,8 @@ export class Player extends Phaser.GameObjects.Container {
 
     this.useSkill('FIREBALL');
     this.castingEffect = true;
+    this.soundManager.playFireball();
+    this.soundManager.playAttackVoice();
 
     // 공격 스프라이트 변경
     this.playerSprite.setTexture(this.facingRight ? 'lily_attack_right' : 'lily_attack_left');
@@ -630,15 +642,8 @@ export class Player extends Phaser.GameObjects.Container {
     if (!this.canUseSkill('DARK_SPIKE') || this.isDead) return;
 
     this.useSkill('DARK_SPIKE');
-    this.castingEffect = true;
-    this.scene.time.delayedCall(300, () => this.castingEffect = false);
-
-    // 공격 스프라이트
-    this.playerSprite.setTexture(this.facingRight ? 'lily_attack_right' : 'lily_attack_left');
-    this.playerSprite.setFlipX(false);
-    this.scene.time.delayedCall(300, () => {
-      this.playerSprite.setTexture('lily_right');
-    });
+    this.soundManager.playDarkSpike();
+    this.soundManager.playSkillVoice();
 
     const damage = SKILL_TYPES.DARK_SPIKE.damage + this.attack * 0.8;
     const spikeCount = (SKILL_TYPES.DARK_SPIKE as any).spikeCount || 3;
@@ -753,6 +758,8 @@ export class Player extends Phaser.GameObjects.Container {
     if (!this.canUseSkill('BONE_SPIKE') || this.isDead) return;
 
     this.useSkill('BONE_SPIKE');
+    this.soundManager.playBoneSpike();
+    this.soundManager.playSkillVoice();
     this.castingEffect = true;
     this.scene.time.delayedCall(300, () => this.castingEffect = false);
 
@@ -916,6 +923,8 @@ export class Player extends Phaser.GameObjects.Container {
     if (!this.canUseSkill('CORPSE_BOMB') || this.isDead) return;
 
     this.useSkill('CORPSE_BOMB');
+    this.soundManager.playCorpseBomb();
+    this.soundManager.playSkillVoice();
     this.castingEffect = true;
     this.scene.time.delayedCall(400, () => this.castingEffect = false);
 
@@ -1098,15 +1107,8 @@ export class Player extends Phaser.GameObjects.Container {
     if (!this.canUseSkill('DARK_METEOR') || this.isDead) return;
 
     this.useSkill('DARK_METEOR');
-    this.castingEffect = true;
-    this.scene.time.delayedCall(600, () => this.castingEffect = false);
-
-    // 공격 스프라이트
-    this.playerSprite.setTexture(this.facingRight ? 'lily_attack_right' : 'lily_attack_left');
-    this.playerSprite.setFlipX(false);
-    this.scene.time.delayedCall(600, () => {
-      this.playerSprite.setTexture('lily_right');
-    });
+    this.soundManager.playDarkMeteorCast();
+    this.soundManager.playSkillVoice();
 
     const damage = SKILL_TYPES.DARK_METEOR.damage + this.attack * 1.5;
     const meteorCount = (SKILL_TYPES.DARK_METEOR as any).meteorCount || 8;
@@ -1235,6 +1237,7 @@ export class Player extends Phaser.GameObjects.Container {
     if (!this.canUseSkill('DARK_SHIELD') || this.isDead) return;
 
     this.useSkill('DARK_SHIELD');
+    this.soundManager.playShield();
     this.darkShieldActive = true;
     this.darkShieldTimer = SKILL_TYPES.DARK_SHIELD.duration || 8000;
     this.damageReduction = SKILL_TYPES.DARK_SHIELD.damageReduction || 0.5;
@@ -1267,6 +1270,8 @@ export class Player extends Phaser.GameObjects.Container {
     if (!this.canUseSkill('CURSE') || this.isDead) return;
 
     this.useSkill('CURSE');
+    this.soundManager.playCurse();
+    this.soundManager.playSkillVoice();
 
     const radius = 200;
     const duration = SKILL_TYPES.CURSE.duration || 6000;
@@ -1321,6 +1326,8 @@ export class Player extends Phaser.GameObjects.Container {
     if (!this.canUseSkill('SOUL_DRAIN') || this.isDead) return;
 
     this.useSkill('SOUL_DRAIN');
+    this.soundManager.playSoulDrain();
+    this.soundManager.playSkillVoice();
     this.castingEffect = true;
     this.scene.time.delayedCall(400, () => this.castingEffect = false);
 
@@ -1385,6 +1392,8 @@ export class Player extends Phaser.GameObjects.Container {
     if (!this.canUseSkill('DEATH_WAVE') || this.isDead) return;
 
     this.useSkill('DEATH_WAVE');
+    this.soundManager.playDeathWave();
+    this.soundManager.playSkillVoice();
     this.castingEffect = true;
     this.scene.time.delayedCall(600, () => this.castingEffect = false);
 
@@ -1612,6 +1621,10 @@ export class Player extends Phaser.GameObjects.Container {
     const actualDamage = Math.max(1, (amount - this.defense) * this.damageReduction);
     this.currentHealth -= actualDamage;
 
+    // 피격 사운드
+    this.soundManager.playPlayerHit();
+    this.soundManager.playHitVoice();
+
     // 피격 효과
     this.isInvincible = true;
     this.invincibleTimer = 1;
@@ -1716,6 +1729,7 @@ export class Player extends Phaser.GameObjects.Container {
 
   private levelUp(): void {
     this.level++;
+    this.soundManager.playLevelUp();
 
     // 스탯 증가
     this.maxHealth += LEVEL_CONFIG.statGrowth.health;
@@ -1788,6 +1802,7 @@ export class Player extends Phaser.GameObjects.Container {
 
   private die(): void {
     this.isDead = true;
+    this.soundManager.playPlayerDeath();
 
     // 죽음 모션 - 회전 + 페이드
     this.scene.tweens.add({
