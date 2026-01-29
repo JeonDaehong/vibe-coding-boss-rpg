@@ -240,7 +240,7 @@ export class PuzzleSystem {
     this.scene.time.delayedCall(delay + 500, () => {
       this.isShowingSequence = false;
       this.isInputEnabled = true;
-      this.instructionText.setText('기둥에 다가가 ↑를 눌러 활성화하세요!');
+      this.instructionText.setText('기둥에 다가가 ↓를 눌러 활성화하세요!');
       this.updateProgressDisplay();
     });
   }

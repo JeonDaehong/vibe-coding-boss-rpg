@@ -345,6 +345,22 @@ export class GameScene extends Phaser.Scene {
       this.addPlatform(300, 450, 200);
       this.addPlatform(800, 400, 200);
       this.addPlatform(1100, 450, 200);
+    } else if (this.isTowerMap(this.currentMap)) {
+      // 타워 - 메이플 스타일 공중 플랫폼
+      // 1단 플랫폼 (낮은 높이)
+      this.addPlatform(150, 480, 140);
+      this.addPlatform(450, 480, 140);
+      this.addPlatform(750, 480, 140);
+      this.addPlatform(1050, 480, 140);
+      // 2단 플랫폼 (중간 높이)
+      this.addPlatform(300, 390, 160);
+      this.addPlatform(650, 390, 160);
+      this.addPlatform(950, 390, 160);
+      // 3단 플랫폼 (높은 높이)
+      this.addPlatform(200, 300, 130);
+      this.addPlatform(500, 300, 130);
+      this.addPlatform(800, 300, 130);
+      this.addPlatform(1100, 300, 130);
     }
   }
 
@@ -394,6 +410,7 @@ export class GameScene extends Phaser.Scene {
       d: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
       f: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F),
       up: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+      down: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
     };
   }
 
@@ -453,6 +470,16 @@ export class GameScene extends Phaser.Scene {
         this.player.addCombo();
       }
     }
+
+    // 미니보스 체크
+    for (const mb of this.miniBosses) {
+      if (mb.isDead) continue;
+      const mbHitbox = mb.getHitbox();
+      if (Phaser.Geom.Intersects.RectangleToRectangle(hitbox, mbHitbox)) {
+        mb.takeDamage(damage, 0, this.time.now);
+        this.player.addCombo();
+      }
+    }
   }
 
   private handleCorpseBombHit(hitbox: Phaser.Geom.Circle, damage: number): void {
@@ -471,6 +498,16 @@ export class GameScene extends Phaser.Scene {
       const bHitbox = this.boss.getHitbox();
       if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, bHitbox)) {
         this.boss.takeDamage(damage, this.boss.x > hitbox.x ? 1 : -1, this.time.now);
+        this.player.addCombo();
+      }
+    }
+
+    // 미니보스 체크
+    for (const mb of this.miniBosses) {
+      if (mb.isDead) continue;
+      const mbHitbox = mb.getHitbox();
+      if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, mbHitbox)) {
+        mb.takeDamage(damage, mb.x > hitbox.x ? 1 : -1, this.time.now);
         this.player.addCombo();
       }
     }
@@ -510,6 +547,17 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // 미니보스 체크
+    for (const mb of this.miniBosses) {
+      if (mb.isDead) continue;
+      const mbHitbox = mb.getHitbox();
+      if (Phaser.Geom.Intersects.RectangleToRectangle(hitbox, mbHitbox)) {
+        mb.takeDamage(damage, 0, this.time.now);
+        totalDamage += damage;
+        this.player.addCombo();
+      }
+    }
+
     // 흡수 치유
     if (totalDamage > 0) {
       player.heal(totalDamage * healPercent);
@@ -534,6 +582,17 @@ export class GameScene extends Phaser.Scene {
       if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, bHitbox)) {
         const dir = this.boss.x > hitbox.x ? 1 : -1;
         this.boss.takeDamage(damage, dir, this.time.now);
+        this.player.addCombo();
+      }
+    }
+
+    // 미니보스 체크
+    for (const mb of this.miniBosses) {
+      if (mb.isDead) continue;
+      const mbHitbox = mb.getHitbox();
+      if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, mbHitbox)) {
+        const dir = mb.x > hitbox.x ? 1 : -1;
+        mb.takeDamage(damage, dir, this.time.now);
         this.player.addCombo();
       }
     }
@@ -1026,7 +1085,7 @@ export class GameScene extends Phaser.Scene {
 
     // 4층 퍼즐 - 기둥 활성화
     if (this.puzzleSystem && this.puzzleSystem.isWaitingForInput()) {
-      if (Phaser.Input.Keyboard.JustDown(this.keys.up) || Phaser.Input.Keyboard.JustDown(this.keys.space)) {
+      if (Phaser.Input.Keyboard.JustDown(this.keys.down) || Phaser.Input.Keyboard.JustDown(this.keys.space)) {
         const pillarIndex = this.puzzleSystem.checkPlayerNearPillar(this.player.x, this.player.y);
         if (pillarIndex >= 0) {
           this.puzzleSystem.activatePillar(pillarIndex);
@@ -1242,18 +1301,20 @@ export class GameScene extends Phaser.Scene {
     const typeKey = monsterKeys[Math.floor(Math.random() * monsterKeys.length)];
     const config = (MONSTER_TYPES as any)[typeKey];
 
-    // 화면 밖에서 스폰
+    // 화면 양쪽에서 스폰, 맵 안쪽으로 진입
     const side = Math.random() > 0.5 ? 1 : -1;
     const spawnX = side > 0 ? this.mapConfig.width + 50 : -50;
+    const targetX = 200 + Math.random() * (this.mapConfig.width - 400);
     const spawnY = this.groundY - 30;
 
     const monster = new Monster(this, spawnX, spawnY, config);
+    monster.setPlayerTarget(this.player);
     this.monsters.push(monster);
 
-    // 입장 애니메이션
+    // 입장 후 플레이어 추적
     this.tweens.add({
       targets: monster,
-      x: side > 0 ? this.mapConfig.width - 100 : 100,
+      x: targetX,
       duration: 500,
       ease: 'Quad.easeOut',
     });

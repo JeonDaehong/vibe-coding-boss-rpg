@@ -570,7 +570,7 @@ export class Player extends Phaser.GameObjects.Container {
     (this.scene as any).projectiles.push({
       graphics: fireball,
       update: () => {
-        if (!(fireball as any).isActive) return;
+        if (!(fireball as any).isActive || !fireball.active) return;
         fireball.x += (fireball as any).velocityX * (1 / 60);
         fireball.setDepth(fireball.y);
         drawFireball();
@@ -578,13 +578,14 @@ export class Player extends Phaser.GameObjects.Container {
         if (fireball.x < this.scene.cameras.main.scrollX - 100 ||
             fireball.x > this.scene.cameras.main.scrollX + 1400) {
           (fireball as any).isActive = false;
-          fireball.destroy();
+          if (fireball.active) fireball.destroy();
         }
       },
       damage: (fireball as any).damage,
       hitbox: { x: fireball.x, y: fireball.y, width: 35, height: 35 },
       getHitbox: () => new Phaser.Geom.Rectangle(fireball.x - 17, fireball.y - 17, 35, 35),
       destroy: () => {
+        if (!(fireball as any).isActive && !fireball.active) return;
         (fireball as any).isActive = false;
 
         // 대형 폭발 이펙트
@@ -629,7 +630,7 @@ export class Player extends Phaser.GameObjects.Container {
 
         // 화면 흔들림
         this.scene.cameras.main.shake(100, 0.008);
-        fireball.destroy();
+        if (fireball.active) fireball.destroy();
       },
     });
 
