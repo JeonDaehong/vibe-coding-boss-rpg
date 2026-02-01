@@ -37,6 +37,8 @@ export class Monster extends Phaser.GameObjects.Container {
   private attackCooldown: number = 0;
   private target: any = null;
   private playerTarget: any = null;
+  private aggro: boolean = false;
+  private aggroTimer: number = 0;
 
   // 스프라이트
   private body_sprite!: Phaser.GameObjects.Graphics;
@@ -240,11 +242,10 @@ export class Monster extends Phaser.GameObjects.Container {
   }
 
   private updateAI(time: number, delta: number): void {
-    // 소환수를 발견하면 추적
+    // 소환수가 있으면 소환수 쪽으로 이동
     if (this.target && this.target.isAlive) {
       const dx = this.target.x - this.x;
       this.facingRight = dx > 0;
-
       if (Math.abs(dx) > 50) {
         this.velocityX = this.facingRight ? this.config.speed * 1.2 : -this.config.speed * 1.2;
       } else {
@@ -253,49 +254,51 @@ export class Monster extends Phaser.GameObjects.Container {
       return;
     }
 
-    // 플레이어 타겟이 있으면 적극 추적 및 공격
-    if (this.playerTarget && !this.playerTarget.isDead) {
+    // 어그로 타이머 감소
+    if (this.aggro) {
+      this.aggroTimer -= delta;
+      if (this.aggroTimer <= 0) {
+        this.aggro = false;
+      }
+    }
+
+    // 어그로 상태: 플레이어를 향해 추적 (맞으면 5초간 쫓아옴)
+    if (this.aggro && this.playerTarget && !this.playerTarget.isDead) {
       const dx = this.playerTarget.x - this.x;
       this.facingRight = dx > 0;
-
-      if (Math.abs(dx) > 40) {
-        this.velocityX = (this.facingRight ? 1 : -1) * this.config.speed * 1.5;
+      if (Math.abs(dx) > 30) {
+        this.velocityX = (this.facingRight ? 1 : -1) * this.config.speed * 0.7;
       } else {
         this.velocityX = 0;
-        // 근접 공격
-        if (this.attackCooldown <= 0) {
-          this.attackCooldown = 800;
-          this.playerTarget.takeDamage(this.attack, time);
-
-          const attackEffect = this.scene.add.graphics();
-          attackEffect.setPosition(this.x + (this.facingRight ? 20 : -20), this.y - this.hitbox.height / 2);
-          attackEffect.fillStyle(0xff4444, 0.8);
-          attackEffect.fillCircle(0, 0, 15);
-          attackEffect.setDepth(this.y + 1);
-          this.scene.tweens.add({
-            targets: attackEffect,
-            alpha: 0,
-            scaleX: 1.5,
-            scaleY: 1.5,
-            duration: 150,
-            onComplete: () => attackEffect.destroy(),
-          });
-        }
       }
       return;
     }
 
-    // 순찰
+    // 평상시: 메이플스타일 순찰
     this.patrolTimer += delta;
 
     if (this.patrolTimer > 2000 + Math.random() * 2000) {
       this.patrolTimer = 0;
       this.patrolDir *= -1;
+
+      // 가끔 멈추기
+      if (Math.random() < 0.3) {
+        this.velocityX = 0;
+        return;
+      }
+    }
+
+    // 플레이어 근처면 방향만 살짝 틀기
+    if (this.playerTarget && !this.playerTarget.isDead) {
+      const dx = this.playerTarget.x - this.x;
+      if (Math.abs(dx) < 200) {
+        this.patrolDir = dx > 0 ? 1 : -1;
+      }
     }
 
     // 이동
     if (!this.isHit) {
-      this.velocityX = this.patrolDir * this.config.speed;
+      this.velocityX = this.patrolDir * this.config.speed * 0.7;
       this.facingRight = this.patrolDir > 0;
     }
 
@@ -309,6 +312,8 @@ export class Monster extends Phaser.GameObjects.Container {
     this.currentHealth -= amount;
     this.isHit = true;
     this.hitTimer = time;
+    this.aggro = true;
+    this.aggroTimer = 5000;
 
     // 피격 효과
     this.body_sprite.setAlpha(0.5);

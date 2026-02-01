@@ -1,11 +1,8 @@
 import Phaser from 'phaser';
-import { GAME_WIDTH, GAME_HEIGHT, MAP_CONFIG, MapType, MONSTER_TYPES, KEY_CONFIG, TOWER_CONFIG } from '../config/GameConfig';
+import { GAME_WIDTH, GAME_HEIGHT, MAP_CONFIG, MapType, MONSTER_TYPES, KEY_CONFIG, TOWER_CONFIG, TOWER_MONSTER_POOL } from '../config/GameConfig';
 import { Player } from '../entities/Player';
 import { Monster } from '../entities/Monster';
 import { TrollKing } from '../entities/TrollKing';
-import { CrystalTower } from '../entities/CrystalTower';
-import { MiniBoss } from '../entities/MiniBoss';
-import { PuzzleSystem } from '../systems/PuzzleSystem';
 import { SoundManager } from '../utils/SoundManager';
 
 export class GameScene extends Phaser.Scene {
@@ -35,24 +32,16 @@ export class GameScene extends Phaser.Scene {
   private npc: Phaser.GameObjects.Container | null = null;
 
   // 탑 시스템
-  private crystalTowers: CrystalTower[] = [];
-  private miniBosses: MiniBoss[] = [];
-  private puzzleSystem: PuzzleSystem | null = null;
   private soundManager: SoundManager;
   private towerFloorUI: Phaser.GameObjects.Container | null = null;
   private floorTimerText: Phaser.GameObjects.Text | null = null;
   private floorObjectiveText: Phaser.GameObjects.Text | null = null;
 
-  // 1층 상태
+  // 웨이브 상태 (1~4층 공통)
   private waveTimer: number = 0;
-  private currentWave: number = 0;
-  private waveKillCount: number = 0;
   private totalWaveKills: number = 0;
-  private floor1Active: boolean = false;
-
-  // 3층 상태
-  private firstBossKilledTime: number = 0;
-  private reviveTimerActive: boolean = false;
+  private floorActive: boolean = false;
+  private floorSpawnTimer: Phaser.Time.TimerEvent | null = null;
 
   // 층 클리어 상태
   private floorCleared: boolean = false;
@@ -471,15 +460,6 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 미니보스 체크
-    for (const mb of this.miniBosses) {
-      if (mb.isDead) continue;
-      const mbHitbox = mb.getHitbox();
-      if (Phaser.Geom.Intersects.RectangleToRectangle(hitbox, mbHitbox)) {
-        mb.takeDamage(damage, 0, this.time.now);
-        this.player.addCombo();
-      }
-    }
   }
 
   private handleCorpseBombHit(hitbox: Phaser.Geom.Circle, damage: number): void {
@@ -502,15 +482,6 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 미니보스 체크
-    for (const mb of this.miniBosses) {
-      if (mb.isDead) continue;
-      const mbHitbox = mb.getHitbox();
-      if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, mbHitbox)) {
-        mb.takeDamage(damage, mb.x > hitbox.x ? 1 : -1, this.time.now);
-        this.player.addCombo();
-      }
-    }
   }
 
   private handleCurseHit(hitbox: Phaser.Geom.Circle, duration: number, debuffAmount: number): void {
@@ -547,17 +518,6 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 미니보스 체크
-    for (const mb of this.miniBosses) {
-      if (mb.isDead) continue;
-      const mbHitbox = mb.getHitbox();
-      if (Phaser.Geom.Intersects.RectangleToRectangle(hitbox, mbHitbox)) {
-        mb.takeDamage(damage, 0, this.time.now);
-        totalDamage += damage;
-        this.player.addCombo();
-      }
-    }
-
     // 흡수 치유
     if (totalDamage > 0) {
       player.heal(totalDamage * healPercent);
@@ -586,16 +546,6 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 미니보스 체크
-    for (const mb of this.miniBosses) {
-      if (mb.isDead) continue;
-      const mbHitbox = mb.getHitbox();
-      if (Phaser.Geom.Intersects.CircleToRectangle(hitbox, mbHitbox)) {
-        const dir = mb.x > hitbox.x ? 1 : -1;
-        mb.takeDamage(damage, dir, this.time.now);
-        this.player.addCombo();
-      }
-    }
   }
 
   private createVillageNPC(): void {
@@ -964,18 +914,6 @@ export class GameScene extends Phaser.Scene {
           }
         }
 
-        // 수정탑 충돌 (2층)
-        for (const crystal of this.crystalTowers) {
-          if (crystal.isDead || !this.projectiles[i]) continue;
-          const cHitbox = crystal.getHitbox();
-          if (Phaser.Geom.Intersects.RectangleToRectangle(projHitbox, cHitbox)) {
-            crystal.takeDamage(proj.damage);
-            this.player.addCombo();
-            if (proj.destroy) proj.destroy();
-            this.projectiles.splice(i, 1);
-            break;
-          }
-        }
       }
 
       // 비활성 투사체 정리
@@ -990,29 +928,9 @@ export class GameScene extends Phaser.Scene {
     // 죽은 몬스터 정리
     this.monsters = this.monsters.filter(m => !m.isDead || m.active);
 
-    // 타워 층별 업데이트
-    if (this.isTowerMap(this.currentMap)) {
-      switch (this.currentMap) {
-        case MapType.TOWER_1:
-          this.updateFloor1(time, delta);
-          break;
-        case MapType.TOWER_2:
-          this.updateFloor2(time, delta);
-          break;
-        case MapType.TOWER_3:
-          this.updateFloor3(time, delta);
-          break;
-        case MapType.TOWER_4:
-          this.updateFloor4(time, delta);
-          break;
-      }
-    }
-
-    // 몬스터 사망 이벤트 (1층용)
-    for (const monster of this.monsters) {
-      if (monster.isDead && this.floor1Active) {
-        this.events.emit('monsterKilled');
-      }
+    // 타워 웨이브 업데이트 (1~4층 공통)
+    if (this.floorActive && !this.floorCleared) {
+      this.updateWaveFloor(time, delta);
     }
   }
 
@@ -1083,15 +1001,6 @@ export class GameScene extends Phaser.Scene {
       this.player.castDeathWave();
     }
 
-    // 4층 퍼즐 - 기둥 활성화
-    if (this.puzzleSystem && this.puzzleSystem.isWaitingForInput()) {
-      if (Phaser.Input.Keyboard.JustDown(this.keys.down) || Phaser.Input.Keyboard.JustDown(this.keys.space)) {
-        const pillarIndex = this.puzzleSystem.checkPlayerNearPillar(this.player.x, this.player.y);
-        if (pillarIndex >= 0) {
-          this.puzzleSystem.activatePillar(pillarIndex);
-        }
-      }
-    }
   }
 
   // === 탑 시스템 ===
@@ -1118,19 +1027,15 @@ export class GameScene extends Phaser.Scene {
     this.platforms = [];
 
     // 탑 관련 정리
-    this.crystalTowers.forEach(c => c.destroy());
-    this.crystalTowers = [];
-    this.miniBosses.forEach(m => m.destroy());
-    this.miniBosses = [];
-    if (this.puzzleSystem) {
-      this.puzzleSystem = null;
-    }
     if (this.towerFloorUI) {
       this.towerFloorUI.destroy();
       this.towerFloorUI = null;
     }
-    this.floor1Active = false;
-    this.reviveTimerActive = false;
+    if (this.floorSpawnTimer) {
+      this.floorSpawnTimer.destroy();
+      this.floorSpawnTimer = null;
+    }
+    this.floorActive = false;
     this.floorCleared = false;
   }
 
@@ -1144,22 +1049,10 @@ export class GameScene extends Phaser.Scene {
     this.createTowerBackground();
     this.createTowerFloorUI();
 
-    switch (floor) {
-      case MapType.TOWER_1:
-        this.startFloor1();
-        break;
-      case MapType.TOWER_2:
-        this.startFloor2();
-        break;
-      case MapType.TOWER_3:
-        this.startFloor3();
-        break;
-      case MapType.TOWER_4:
-        this.startFloor4();
-        break;
-      case MapType.TOWER_5:
-        this.startFloor5();
-        break;
+    if (floor === MapType.TOWER_5) {
+      this.startFloor5();
+    } else {
+      this.startWaveFloor(floor);
     }
   }
 
@@ -1264,237 +1157,90 @@ export class GameScene extends Phaser.Scene {
     this.towerFloorUI.add(this.floorObjectiveText);
   }
 
-  // === 1층: 웨이브 서바이벌 ===
-  private startFloor1(): void {
-    this.floor1Active = true;
+  // === 1~4층: 웨이브 서바이벌 (공통) ===
+  private startWaveFloor(floor: MapType): void {
+    this.floorActive = true;
     this.totalWaveKills = 0;
-    this.waveTimer = (TOWER_CONFIG[MapType.TOWER_1] as any).duration;
+    const config = (TOWER_CONFIG as any)[floor];
+    this.waveTimer = config.duration;
 
-    this.floorObjectiveText?.setText('3분 동안 살아남으세요!');
+    const floorNum = [MapType.TOWER_1, MapType.TOWER_2, MapType.TOWER_3, MapType.TOWER_4].indexOf(floor) + 1;
+    this.floorObjectiveText?.setText(`${floorNum}층 - 1분 동안 살아남으세요!`);
 
-    // 초기 몬스터 스폰
-    this.spawnFloor1Monster();
-    this.spawnFloor1Monster();
-    this.spawnFloor1Monster();
+    // 초기 몬스터 3마리
+    for (let i = 0; i < 3; i++) {
+      this.spawnWaveMonster(floor);
+    }
 
-    // 끊임없이 몬스터 스폰 (1.5초마다)
-    this.time.addEvent({
-      delay: 1500,
+    // 지속적으로 몬스터 스폰
+    this.floorSpawnTimer = this.time.addEvent({
+      delay: config.spawnInterval,
       callback: () => {
-        if (this.floor1Active && !this.floorCleared) {
-          // 현재 살아있는 몬스터가 8마리 미만이면 스폰
+        if (this.floorActive && !this.floorCleared) {
           const aliveMonsters = this.monsters.filter(m => !m.isDead).length;
-          if (aliveMonsters < 8) {
-            this.spawnFloor1Monster();
+          if (aliveMonsters < config.maxAlive) {
+            this.spawnWaveMonster(floor);
           }
         }
       },
       loop: true,
     });
-
-    // 이벤트 리스너
-    this.events.on('monsterKilled', this.onFloor1MonsterKilled, this);
   }
 
-  private spawnFloor1Monster(): void {
-    const monsterKeys = Object.keys(MONSTER_TYPES);
-    const typeKey = monsterKeys[Math.floor(Math.random() * monsterKeys.length)];
+  private spawnWaveMonster(floor: MapType): void {
+    const pool = TOWER_MONSTER_POOL[floor] || Object.keys(MONSTER_TYPES);
+    const typeKey = pool[Math.floor(Math.random() * pool.length)];
     const config = (MONSTER_TYPES as any)[typeKey];
 
-    // 화면 양쪽에서 스폰, 맵 안쪽으로 진입
-    const side = Math.random() > 0.5 ? 1 : -1;
-    const spawnX = side > 0 ? this.mapConfig.width + 50 : -50;
-    const targetX = 200 + Math.random() * (this.mapConfig.width - 400);
+    // 층이 올라갈수록 몬스터 강화
+    const floorNum = [MapType.TOWER_1, MapType.TOWER_2, MapType.TOWER_3, MapType.TOWER_4].indexOf(floor) + 1;
+    const scaledConfig = {
+      ...config,
+      health: Math.floor(config.health * (1 + (floorNum - 1) * 0.5)),
+      attack: Math.floor(config.attack * (1 + (floorNum - 1) * 0.3)),
+      exp: Math.floor(config.exp * (1 + (floorNum - 1) * 0.4)),
+      gold: Math.floor(config.gold * (1 + (floorNum - 1) * 0.3)),
+    };
+
+    // 맵 안 랜덤 위치에 스폰
+    const spawnX = 100 + Math.random() * (this.mapConfig.width - 200);
     const spawnY = this.groundY - 30;
 
-    const monster = new Monster(this, spawnX, spawnY, config);
+    const monster = new Monster(this, spawnX, spawnY, scaledConfig);
     monster.setPlayerTarget(this.player);
     this.monsters.push(monster);
 
-    // 입장 후 플레이어 추적
+    // 페이드인 등장
+    monster.setAlpha(0);
     this.tweens.add({
       targets: monster,
-      x: targetX,
-      duration: 500,
-      ease: 'Quad.easeOut',
+      alpha: 1,
+      duration: 400,
+      ease: 'Sine.easeIn',
     });
   }
 
-  private onFloor1MonsterKilled(): void {
-    this.totalWaveKills++;
-    this.floorObjectiveText?.setText(`처치: ${this.totalWaveKills}`);
-  }
-
-  private updateFloor1(time: number, delta: number): void {
-    if (!this.floor1Active || this.floorCleared) return;
-
+  private updateWaveFloor(time: number, delta: number): void {
     this.waveTimer -= delta;
     const seconds = Math.ceil(this.waveTimer / 1000);
     this.floorTimerText?.setText(`${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`);
 
+    // 킬 카운트 업데이트
+    let newKills = 0;
+    for (const monster of this.monsters) {
+      if (monster.isDead) newKills++;
+    }
+    if (newKills !== this.totalWaveKills) {
+      this.totalWaveKills = newKills;
+      this.floorObjectiveText?.setText(`처치: ${this.totalWaveKills}`);
+    }
+
     if (this.waveTimer <= 0) {
-      this.floor1Active = false;
-      // 시간 종료 - 클리어!
+      this.floorActive = false;
       this.floorObjectiveText?.setText(`클리어! 총 ${this.totalWaveKills}마리 처치!`);
       this.time.delayedCall(1500, () => {
         this.completeFloor();
       });
-    }
-  }
-
-  // === 2층: 수정탑 파괴 ===
-  private startFloor2(): void {
-    const crystalCount = (TOWER_CONFIG[MapType.TOWER_2] as any).crystalCount;
-    const spacing = (this.mapConfig.width - 200) / (crystalCount + 1);
-
-    for (let i = 0; i < crystalCount; i++) {
-      const x = 100 + (i + 1) * spacing;
-      const crystal = new CrystalTower(this, x, this.groundY);
-      this.crystalTowers.push(crystal);
-    }
-
-    this.floorObjectiveText?.setText(`수정탑: 0 / ${crystalCount}`);
-
-    // 수정 파괴 이벤트
-    this.events.on('crystalDestroyed', this.onCrystalDestroyed, this);
-
-    // 투사체 피격 이벤트
-    this.events.on('crystalProjectileHit', (damage: number) => {
-      this.player.takeDamage(damage, this.time.now);
-    });
-  }
-
-  private onCrystalDestroyed(): void {
-    const destroyed = this.crystalTowers.filter(c => c.isDead).length;
-    const total = this.crystalTowers.length;
-    this.floorObjectiveText?.setText(`수정탑: ${destroyed} / ${total}`);
-
-    if (destroyed >= total) {
-      this.completeFloor();
-    }
-  }
-
-  private updateFloor2(time: number, delta: number): void {
-    // 수정탑 업데이트
-    for (const crystal of this.crystalTowers) {
-      if (!crystal.isDead) {
-        crystal.update(time, delta, this.player.x, this.player.y);
-      }
-    }
-  }
-
-  // === 3층: 쌍둥이 보스 ===
-  private startFloor3(): void {
-    const bossA = new MiniBoss(this, 400, this.groundY, 'SHADOW_TWIN_A');
-    const bossB = new MiniBoss(this, this.mapConfig.width - 400, this.groundY, 'SHADOW_TWIN_B');
-
-    bossA.setTarget(this.player);
-    bossB.setTarget(this.player);
-    bossA.setSibling(bossB);
-    bossB.setSibling(bossA);
-
-    this.miniBosses.push(bossA, bossB);
-
-    this.floorObjectiveText?.setText('쌍둥이를 처치하세요!');
-
-    // 미니보스 이벤트
-    this.events.on('miniBossKilled', this.onMiniBossKilled, this);
-    this.events.on('miniBossRevived', this.onMiniBossRevived, this);
-    this.events.on('miniBossAttackHit', (damage: number) => {
-      this.player.takeDamage(damage, this.time.now);
-    });
-  }
-
-  private onMiniBossKilled(boss: MiniBoss): void {
-    const aliveCount = this.miniBosses.filter(m => !m.isDead).length;
-
-    if (aliveCount === 0) {
-      // 둘 다 죽음 - 클리어
-      this.completeFloor();
-    } else {
-      // 첫 번째만 죽음 - 부활 타이머 시작
-      this.firstBossKilledTime = this.time.now;
-      this.reviveTimerActive = true;
-      this.soundManager.playReviveWarning();
-
-      const reviveTime = (TOWER_CONFIG[MapType.TOWER_3] as any).reviveTimer / 1000;
-      this.floorObjectiveText?.setText(`${reviveTime}초 안에 나머지를 처치하세요!`);
-    }
-  }
-
-  private onMiniBossRevived(boss: MiniBoss): void {
-    this.reviveTimerActive = false;
-    this.floorObjectiveText?.setText('쌍둥이를 처치하세요!');
-  }
-
-  private updateFloor3(time: number, delta: number): void {
-    // 미니보스 업데이트
-    for (const boss of this.miniBosses) {
-      boss.update(time, delta, this.groundY);
-    }
-
-    // 부활 타이머 체크
-    if (this.reviveTimerActive) {
-      const elapsed = time - this.firstBossKilledTime;
-      const reviveTime = (TOWER_CONFIG[MapType.TOWER_3] as any).reviveTimer;
-      const remaining = Math.ceil((reviveTime - elapsed) / 1000);
-
-      this.floorTimerText?.setText(`${remaining}초`);
-
-      if (elapsed >= reviveTime) {
-        // 부활!
-        const deadBoss = this.miniBosses.find(m => m.isDead && !m.isReviving);
-        if (deadBoss) {
-          deadBoss.startRevive();
-        }
-        this.reviveTimerActive = false;
-      }
-    }
-
-    // 투사체 충돌 체크 (미니보스)
-    for (let i = this.projectiles.length - 1; i >= 0; i--) {
-      const proj = this.projectiles[i];
-      if (!proj.getHitbox) continue;
-
-      const projHitbox = proj.getHitbox();
-
-      for (const boss of this.miniBosses) {
-        if (boss.isDead) continue;
-        const bHitbox = boss.getHitbox();
-        if (Phaser.Geom.Intersects.RectangleToRectangle(projHitbox, bHitbox)) {
-          const dir = boss.x > proj.graphics.x ? 1 : -1;
-          boss.takeDamage(proj.damage, dir, time);
-          this.player.addCombo();
-          if (proj.destroy) proj.destroy();
-          this.projectiles.splice(i, 1);
-          break;
-        }
-      }
-    }
-  }
-
-  // === 4층: 퍼즐 ===
-  private startFloor4(): void {
-    const timeLimit = (TOWER_CONFIG[MapType.TOWER_4] as any).timeLimit;
-
-    this.puzzleSystem = new PuzzleSystem(
-      this,
-      this.groundY,
-      timeLimit,
-      () => this.completeFloor(),
-      () => this.failFloor('시간 초과!')
-    );
-
-    this.puzzleSystem.start();
-    this.floorObjectiveText?.setText('룬의 순서를 맞추세요!');
-  }
-
-  private updateFloor4(time: number, delta: number): void {
-    if (this.puzzleSystem && this.puzzleSystem.isActive()) {
-      this.puzzleSystem.update(delta);
-
-      const remaining = Math.ceil(this.puzzleSystem.getTimeRemaining() / 1000);
-      this.floorTimerText?.setText(`${remaining}초`);
     }
   }
 

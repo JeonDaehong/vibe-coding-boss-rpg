@@ -585,17 +585,25 @@ export class Player extends Phaser.GameObjects.Container {
       hitbox: { x: fireball.x, y: fireball.y, width: 35, height: 35 },
       getHitbox: () => new Phaser.Geom.Rectangle(fireball.x - 17, fireball.y - 17, 35, 35),
       destroy: () => {
-        if (!(fireball as any).isActive && !fireball.active) return;
+        if (!(fireball as any).isActive) return;
         (fireball as any).isActive = false;
+
+        // 폭발 위치 저장 (destroy 후에도 사용)
+        const fx = fireball.x;
+        const fy = fireball.y;
+        const fd = fireball.depth;
+
+        // 파이어볼 즉시 제거
+        if (fireball.active) fireball.destroy();
 
         // 대형 폭발 이펙트
         for (let ring = 0; ring < 3; ring++) {
           this.scene.time.delayedCall(ring * 50, () => {
             const explosion = this.scene.add.graphics();
-            explosion.setPosition(fireball.x, fireball.y);
+            explosion.setPosition(fx, fy);
             explosion.fillStyle(0xff6600, 0.8 - ring * 0.2);
             explosion.fillCircle(0, 0, 30 + ring * 15);
-            explosion.setDepth(fireball.y + 2);
+            explosion.setDepth(fd + 2);
 
             this.scene.tweens.add({
               targets: explosion,
@@ -611,10 +619,10 @@ export class Player extends Phaser.GameObjects.Container {
         // 불꽃 파티클
         for (let i = 0; i < 15; i++) {
           const particle = this.scene.add.graphics();
-          particle.setPosition(fireball.x, fireball.y);
+          particle.setPosition(fx, fy);
           particle.fillStyle([0xff6600, 0xffaa00, 0xffff00][Math.floor(Math.random() * 3)], 0.9);
           particle.fillCircle(0, 0, 4 + Math.random() * 5);
-          particle.setDepth(fireball.y + 3);
+          particle.setDepth(fd + 3);
 
           const angle = Math.random() * Math.PI * 2;
           const speed = 50 + Math.random() * 100;
@@ -630,7 +638,6 @@ export class Player extends Phaser.GameObjects.Container {
 
         // 화면 흔들림
         this.scene.cameras.main.shake(100, 0.008);
-        if (fireball.active) fireball.destroy();
       },
     });
 

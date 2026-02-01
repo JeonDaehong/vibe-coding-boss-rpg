@@ -11,7 +11,8 @@
       "Bash(netstat:*)",
       "Bash(findstr:*)",
       "Bash(taskkill /PID 43592 /F)",
-      "Bash(npx vite)"
+      "Bash(npx vite)",
+      "Bash(taskkill:*)"
     ]
   }
 }
